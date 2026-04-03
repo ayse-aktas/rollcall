@@ -76,16 +76,14 @@ class _LoginPageState extends State<LoginPage>
         return;
       }
 
-      // ✅ Düzeltildi: 'kullanicilar' → 'users', 'rol' → 'role'
       final kullanici = await Supabase.instance.client
           .from('users')
           .select('role')
-          .eq('id', response.user!.id)
+          .eq('school_no', okulNo)
           .single();
 
       if (!mounted) return;
 
-      // ✅ Düzeltildi: 'ogrenci' → 'student', 'ogretmen' → 'teacher'
       switch (kullanici['role'] as String) {
         case 'student':
           Navigator.pushReplacementNamed(context, '/ogrenci-anasayfa');
@@ -100,8 +98,10 @@ class _LoginPageState extends State<LoginPage>
           setState(() => _hataMessaji = 'Tanımsız kullanıcı rolü.');
       }
     } on AuthException catch (e) {
+      debugPrint('Supabase auth error: ${e.message}');
       setState(() => _hataMessaji = _hataMesajiCevir(e.message));
     } catch (e) {
+      debugPrint('Unexpected login error: $e');
       setState(
         () => _hataMessaji =
             'Beklenmeyen bir hata oluştu. Lütfen tekrar deneyin.',

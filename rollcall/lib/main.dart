@@ -9,11 +9,16 @@ import 'view/admin/admin_page.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Supabase.initialize(
-    url:
-        'https://vytqqwrcmmjuutysxwxl.supabase.co', // ← Settings → API → Project URL
-    anonKey: 'sb_secret_GLWXhzyDqkM4dHddbpwLmg_1we_reFl',
+  const supabaseUrl = String.fromEnvironment(
+    'SUPABASE_URL',
+    defaultValue: 'https://vytqqwrcmmjuutysxwxl.supabase.co',
   );
+  const supabaseAnonKey = String.fromEnvironment(
+    'SUPABASE_ANON_KEY',
+    defaultValue: 'sb_publishable_kb2fFjGqeOYNIydlStdKVQ_umyYTxUl',
+  );
+
+  await Supabase.initialize(url: supabaseUrl, anonKey: supabaseAnonKey);
 
   runApp(const MyApp());
 }
@@ -24,6 +29,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      debugShowCheckedModeBanner: false,
       initialRoute: '/login',
       routes: {
         '/login': (context) => const LoginPage(),
