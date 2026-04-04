@@ -3,6 +3,30 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/utils/theme/colors/app_colors.dart';
 
+String _translateNotificationMessage(String message) {
+  const courseMap = {
+    'Mobile Application Development': 'Mobil Uygulama Geliştirme',
+    'Database Management Systems': 'Veritabanı Yönetim Sistemleri',
+    'Software Engineering': 'Yazılım Mühendisliği',
+    'Artificial Intelligence': 'Yapay Zeka',
+  };
+  final regex = RegExp(
+    r'(.+?)\s*[—–-]\s*Attendance rate:\s*%?([\d.]+)\s*\(minimum\s*(\d+)%?\s*required\)',
+    caseSensitive: false,
+  );
+  final match = regex.firstMatch(message);
+  if (match != null) {
+    final rawName = match.group(1)?.trim() ?? '';
+    final courseName = courseMap[rawName] ?? rawName;
+    final rate = match.group(2);
+    final minimum = match.group(3);
+    return '$courseName — Devam oranı: %$rate (minimum %$minimum gerekli)';
+  }
+  return message
+      .replaceAll('Attendance rate', 'Devam oranı')
+      .replaceAll('required', 'gerekli');
+}
+
 class AdminPage extends StatefulWidget {
   const AdminPage({super.key});
 
@@ -15,9 +39,9 @@ class _AdminPageState extends State<AdminPage> {
 
   int _userCount = 0;
   int _courseCount = 0;
-  int _attendCount = 0;
+  int _attendanceCount = 0;
   int _warningCount = 0;
-  bool _loading = true;
+  bool _isLoading = true;
 
   List<Map<String, dynamic>> _recentWarnings = [];
 
@@ -30,7 +54,7 @@ class _AdminPageState extends State<AdminPage> {
   Future<void> _loadStats() async {
     final users = await _supabase.from('users').select('id');
     final courses = await _supabase.from('courses').select('id');
-    final attend = await _supabase.from('attendance').select('id');
+    final attendance = await _supabase.from('attendance').select('id');
     final warnings = await _supabase
         .from('notifications')
         .select(
@@ -44,10 +68,10 @@ class _AdminPageState extends State<AdminPage> {
     setState(() {
       _userCount = users.length;
       _courseCount = courses.length;
-      _attendCount = attend.length;
+      _attendanceCount = attendance.length;
       _warningCount = warnings.length;
       _recentWarnings = List<Map<String, dynamic>>.from(warnings);
-      _loading = false;
+      _isLoading = false;
     });
   }
 
@@ -61,7 +85,7 @@ class _AdminPageState extends State<AdminPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: _loading
+      body: _isLoading
           ? const Center(
               child: CircularProgressIndicator(color: AppColors.primary),
             )
@@ -97,7 +121,7 @@ class _AdminPageState extends State<AdminPage> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'Admin Paneli',
+                                  'Yönetim Paneli',
                                   style: TextStyle(
                                     color: AppColors.textPrimary,
                                     fontSize: 18,
@@ -126,7 +150,7 @@ class _AdminPageState extends State<AdminPage> {
                       ),
                       const SizedBox(height: 28),
 
-                      // İstatistik kartları
+                      // Stat cards
                       const Text(
                         'Genel Bakış',
                         style: TextStyle(
@@ -158,7 +182,7 @@ class _AdminPageState extends State<AdminPage> {
                           ),
                           _StatCard(
                             label: 'Yoklama Kaydı',
-                            value: '$_attendCount',
+                            value: '$_attendanceCount',
                             icon: Icons.check_circle_outline,
                             color: AppColors.warning,
                           ),
@@ -172,7 +196,7 @@ class _AdminPageState extends State<AdminPage> {
                       ),
                       const SizedBox(height: 28),
 
-                      // Son uyarılar
+                      // Recent warnings
                       if (_recentWarnings.isNotEmpty) ...[
                         const Text(
                           'Son Devamsızlık Uyarıları',
@@ -183,11 +207,11 @@ class _AdminPageState extends State<AdminPage> {
                           ),
                         ),
                         const SizedBox(height: 12),
-                        ..._recentWarnings.map((w) {
+                        ..._recentWarnings.map((warning) {
                           final user =
-                              w['users'] as Map<String, dynamic>? ?? {};
+                              warning['users'] as Map<String, dynamic>? ?? {};
                           final course =
-                              w['courses'] as Map<String, dynamic>? ?? {};
+                              warning['courses'] as Map<String, dynamic>? ?? {};
                           return Container(
                             margin: const EdgeInsets.only(bottom: 8),
                             padding: const EdgeInsets.all(12),
@@ -218,7 +242,9 @@ class _AdminPageState extends State<AdminPage> {
                                         ),
                                       ),
                                       Text(
-                                        w['message'] ?? '',
+                                        _translateNotificationMessage(
+                                          warning['message'] ?? '',
+                                        ),
                                         style: const TextStyle(
                                           color: AppColors.errorText,
                                           fontSize: 12,

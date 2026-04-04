@@ -14,18 +14,17 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage>
     with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
-  final _okulNoController = TextEditingController();
-  final _sifreController = TextEditingController();
+  final _schoolNoController = TextEditingController();
+  final _passwordController = TextEditingController();
 
-  bool _sifreGizli = true;
-  bool _yukleniyor = false;
-  String? _hataMessaji;
+  bool _isPasswordHidden = true;
+  bool _isLoading = false;
+  String? _errorMessage;
 
   late AnimationController _animController;
   late Animation<double> _fadeAnim;
   late Animation<Offset> _slideAnim;
 
-  static final _okulNoRegex = RegExp(r'^[a-zA-Z]\d{9}$');
   static const _emailDomain = '@ogr.sakarya.edu.tr';
 
   @override
@@ -46,45 +45,45 @@ class _LoginPageState extends State<LoginPage>
   @override
   void dispose() {
     _animController.dispose();
-    _okulNoController.dispose();
-    _sifreController.dispose();
+    _schoolNoController.dispose();
+    _passwordController.dispose();
     super.dispose();
   }
 
-  Future<void> _girisYap() async {
+  Future<void> _signIn() async {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() {
-      _yukleniyor = true;
-      _hataMessaji = null;
+      _isLoading = true;
+      _errorMessage = null;
     });
 
     try {
-      final okulNo = _okulNoController.text.trim().toLowerCase();
-      final sifre = _sifreController.text;
-      final email = '$okulNo$_emailDomain';
+      final schoolNo = _schoolNoController.text.trim().toLowerCase();
+      final password = _passwordController.text;
+      final email = '$schoolNo$_emailDomain';
 
       final response = await Supabase.instance.client.auth.signInWithPassword(
         email: email,
-        password: sifre,
+        password: password,
       );
 
       if (response.user == null) {
         setState(
-          () => _hataMessaji = 'Giriş başarısız. Bilgilerinizi kontrol edin.',
+          () => _errorMessage = 'Giriş başarısız. Bilgilerinizi kontrol edin.',
         );
         return;
       }
 
-      final kullanici = await Supabase.instance.client
+      final user = await Supabase.instance.client
           .from('users')
           .select('role')
-          .eq('school_no', okulNo)
+          .eq('school_no', schoolNo)
           .single();
 
       if (!mounted) return;
 
-      switch (kullanici['role'] as String) {
+      switch (user['role'] as String) {
         case 'student':
           Navigator.pushReplacementNamed(context, '/ogrenci-anasayfa');
           break;
@@ -95,29 +94,32 @@ class _LoginPageState extends State<LoginPage>
           Navigator.pushReplacementNamed(context, '/admin-panel');
           break;
         default:
-          setState(() => _hataMessaji = 'Tanımsız kullanıcı rolü.');
+          setState(() => _errorMessage = 'Tanımsız kullanıcı rolü.');
       }
     } on AuthException catch (e) {
       debugPrint('Supabase auth error: ${e.message}');
-      setState(() => _hataMessaji = _hataMesajiCevir(e.message));
+      setState(() => _errorMessage = _translateAuthError(e.message));
     } catch (e) {
       debugPrint('Unexpected login error: $e');
       setState(
-        () => _hataMessaji =
+        () => _errorMessage =
             'Beklenmeyen bir hata oluştu. Lütfen tekrar deneyin.',
       );
     } finally {
-      if (mounted) setState(() => _yukleniyor = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  String _hataMesajiCevir(String mesaj) {
-    if (mesaj.contains('Invalid login credentials'))
+  String _translateAuthError(String message) {
+    if (message.contains('Invalid login credentials')) {
       return 'Okul numarası veya şifre hatalı.';
-    if (mesaj.contains('Email not confirmed'))
+    }
+    if (message.contains('Email not confirmed')) {
       return 'Hesabınız henüz onaylanmamış.';
-    if (mesaj.contains('Too many requests'))
+    }
+    if (message.contains('Too many requests')) {
       return 'Çok fazla deneme yaptınız. Lütfen bekleyin.';
+    }
     return 'Giriş yapılamadı. Lütfen tekrar deneyin.';
   }
 
@@ -140,21 +142,21 @@ class _LoginPageState extends State<LoginPage>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const SizedBox(height: 56),
-                      const _LogoBolumu(),
+                      const _LogoSection(),
                       const SizedBox(height: 52),
-                      const _EtiketText('Okul Numarası'),
+                      const _LabelText('Okul Numarası'),
                       const SizedBox(height: 8),
-                      _OkulNoAlani(controller: _okulNoController),
+                      _SchoolNoField(controller: _schoolNoController),
                       const SizedBox(height: 4),
-                      _DomainOnizleme(controller: _okulNoController),
+                      _DomainPreview(controller: _schoolNoController),
                       const SizedBox(height: 16),
-                      const _EtiketText('Şifre'),
+                      const _LabelText('Şifre'),
                       const SizedBox(height: 8),
-                      _SifreAlani(
-                        controller: _sifreController,
-                        gizli: _sifreGizli,
-                        onGizliToggle: () =>
-                            setState(() => _sifreGizli = !_sifreGizli),
+                      _PasswordField(
+                        controller: _passwordController,
+                        isHidden: _isPasswordHidden,
+                        onToggleVisibility: () =>
+                            setState(() => _isPasswordHidden = !_isPasswordHidden),
                       ),
                       const SizedBox(height: 12),
                       Align(
@@ -177,16 +179,16 @@ class _LoginPageState extends State<LoginPage>
                         ),
                       ),
                       const SizedBox(height: 8),
-                      if (_hataMessaji != null) ...[
-                        _HataMesaji(mesaj: _hataMessaji!),
+                      if (_errorMessage != null) ...[
+                        _ErrorBanner(message: _errorMessage!),
                         const SizedBox(height: 16),
                       ],
-                      _GirisButonu(
-                        yukleniyor: _yukleniyor,
-                        onPressed: _girisYap,
+                      _LoginButton(
+                        isLoading: _isLoading,
+                        onPressed: _signIn,
                       ),
                       const SizedBox(height: 40),
-                      const _YardimSatiri(),
+                      const _HelpRow(),
                       const SizedBox(height: 32),
                     ],
                   ),
@@ -200,8 +202,8 @@ class _LoginPageState extends State<LoginPage>
   }
 }
 
-class _LogoBolumu extends StatelessWidget {
-  const _LogoBolumu();
+class _LogoSection extends StatelessWidget {
+  const _LogoSection();
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -241,13 +243,13 @@ class _LogoBolumu extends StatelessWidget {
   }
 }
 
-class _EtiketText extends StatelessWidget {
-  final String metin;
-  const _EtiketText(this.metin);
+class _LabelText extends StatelessWidget {
+  final String text;
+  const _LabelText(this.text);
   @override
   Widget build(BuildContext context) {
     return Text(
-      metin,
+      text,
       style: const TextStyle(
         color: AppColors.textSecondary,
         fontSize: 13,
@@ -258,14 +260,14 @@ class _EtiketText extends StatelessWidget {
   }
 }
 
-class _DomainOnizleme extends StatefulWidget {
+class _DomainPreview extends StatefulWidget {
   final TextEditingController controller;
-  const _DomainOnizleme({required this.controller});
+  const _DomainPreview({required this.controller});
   @override
-  State<_DomainOnizleme> createState() => _DomainOnizlemeState();
+  State<_DomainPreview> createState() => _DomainPreviewState();
 }
 
-class _DomainOnizlemeState extends State<_DomainOnizleme> {
+class _DomainPreviewState extends State<_DomainPreview> {
   static final _regex = RegExp(r'^[a-zA-Z]\d{9}$');
 
   @override
@@ -276,21 +278,21 @@ class _DomainOnizlemeState extends State<_DomainOnizleme> {
 
   @override
   Widget build(BuildContext context) {
-    final val = widget.controller.text.trim().toLowerCase();
-    if (val.isEmpty) return const SizedBox.shrink();
-    final gecerli = _regex.hasMatch(val);
+    final value = widget.controller.text.trim().toLowerCase();
+    if (value.isEmpty) return const SizedBox.shrink();
+    final isValid = _regex.hasMatch(value);
     return Row(
       children: [
         Icon(
-          gecerli ? Icons.check_circle_outline : Icons.info_outline,
+          isValid ? Icons.check_circle_outline : Icons.info_outline,
           size: 13,
-          color: gecerli ? AppColors.success : AppColors.textHint,
+          color: isValid ? AppColors.success : AppColors.textHint,
         ),
         const SizedBox(width: 6),
         Text(
-          gecerli ? '$val@ogr.sakarya.edu.tr' : 'Format: b221210036',
+          isValid ? '$value@ogr.sakarya.edu.tr' : 'Format: b221210036',
           style: TextStyle(
-            color: gecerli ? AppColors.success : AppColors.textHint,
+            color: isValid ? AppColors.success : AppColors.textHint,
             fontSize: 12,
           ),
         ),
@@ -299,10 +301,10 @@ class _DomainOnizlemeState extends State<_DomainOnizleme> {
   }
 }
 
-class _OkulNoAlani extends StatelessWidget {
+class _SchoolNoField extends StatelessWidget {
   final TextEditingController controller;
   static final _regex = RegExp(r'^[a-zA-Z]\d{9}$');
-  const _OkulNoAlani({required this.controller});
+  const _SchoolNoField({required this.controller});
 
   @override
   Widget build(BuildContext context) {
@@ -321,61 +323,63 @@ class _OkulNoAlani extends StatelessWidget {
         fontWeight: FontWeight.w500,
         letterSpacing: 1.2,
       ),
-      decoration: _inputDecoration(
+      decoration: _buildInputDecoration(
         hint: 'b221210036',
         prefixIcon: Icons.badge_outlined,
       ),
-      validator: (v) {
-        if (v == null || v.trim().isEmpty)
+      validator: (value) {
+        if (value == null || value.trim().isEmpty) {
           return 'Okul numarası boş bırakılamaz';
-        if (!_regex.hasMatch(v.trim()))
+        }
+        if (!_regex.hasMatch(value.trim())) {
           return 'Geçersiz format. Örnek: b221210036';
+        }
         return null;
       },
     );
   }
 }
 
-class _SifreAlani extends StatelessWidget {
+class _PasswordField extends StatelessWidget {
   final TextEditingController controller;
-  final bool gizli;
-  final VoidCallback onGizliToggle;
-  const _SifreAlani({
+  final bool isHidden;
+  final VoidCallback onToggleVisibility;
+  const _PasswordField({
     required this.controller,
-    required this.gizli,
-    required this.onGizliToggle,
+    required this.isHidden,
+    required this.onToggleVisibility,
   });
 
   @override
   Widget build(BuildContext context) {
     return TextFormField(
       controller: controller,
-      obscureText: gizli,
+      obscureText: isHidden,
       style: const TextStyle(color: AppColors.textPrimary, fontSize: 16),
-      decoration: _inputDecoration(
+      decoration: _buildInputDecoration(
         hint: '••••••••',
         prefixIcon: Icons.lock_outline_rounded,
         suffixIcon: IconButton(
           icon: Icon(
-            gizli ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+            isHidden ? Icons.visibility_off_outlined : Icons.visibility_outlined,
             color: AppColors.textHint,
             size: 20,
           ),
-          onPressed: onGizliToggle,
+          onPressed: onToggleVisibility,
         ),
       ),
-      validator: (v) {
-        if (v == null || v.isEmpty) return 'Şifre boş bırakılamaz';
-        if (v.length < 6) return 'Şifre en az 6 karakter olmalıdır';
+      validator: (value) {
+        if (value == null || value.isEmpty) return 'Şifre boş bırakılamaz';
+        if (value.length < 6) return 'Şifre en az 6 karakter olmalıdır';
         return null;
       },
     );
   }
 }
 
-class _HataMesaji extends StatelessWidget {
-  final String mesaj;
-  const _HataMesaji({required this.mesaj});
+class _ErrorBanner extends StatelessWidget {
+  final String message;
+  const _ErrorBanner({required this.message});
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -395,7 +399,7 @@ class _HataMesaji extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              mesaj,
+              message,
               style: const TextStyle(color: AppColors.errorText, fontSize: 13),
             ),
           ),
@@ -405,10 +409,10 @@ class _HataMesaji extends StatelessWidget {
   }
 }
 
-class _GirisButonu extends StatelessWidget {
-  final bool yukleniyor;
+class _LoginButton extends StatelessWidget {
+  final bool isLoading;
   final VoidCallback onPressed;
-  const _GirisButonu({required this.yukleniyor, required this.onPressed});
+  const _LoginButton({required this.isLoading, required this.onPressed});
 
   @override
   Widget build(BuildContext context) {
@@ -416,17 +420,17 @@ class _GirisButonu extends StatelessWidget {
       width: double.infinity,
       height: 52,
       child: ElevatedButton(
-        onPressed: yukleniyor ? null : onPressed,
+        onPressed: isLoading ? null : onPressed,
         style: ElevatedButton.styleFrom(
           backgroundColor: AppColors.primary,
-          disabledBackgroundColor: AppColors.primary.withOpacity(0.4),
+          disabledBackgroundColor: AppColors.primary.withValues(alpha: 0.4),
           foregroundColor: AppColors.textPrimary,
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
         ),
-        child: yukleniyor
+        child: isLoading
             ? const SizedBox(
                 width: 22,
                 height: 22,
@@ -450,8 +454,8 @@ class _GirisButonu extends StatelessWidget {
   }
 }
 
-class _YardimSatiri extends StatelessWidget {
-  const _YardimSatiri();
+class _HelpRow extends StatelessWidget {
+  const _HelpRow();
   @override
   Widget build(BuildContext context) {
     return Center(
@@ -481,7 +485,7 @@ class _YardimSatiri extends StatelessWidget {
   }
 }
 
-InputDecoration _inputDecoration({
+InputDecoration _buildInputDecoration({
   required String hint,
   required IconData prefixIcon,
   Widget? suffixIcon,

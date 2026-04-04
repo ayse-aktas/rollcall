@@ -10,7 +10,7 @@ class UserListPage extends StatefulWidget {
 
 class _UserListPageState extends State<UserListPage> {
   List<Map<String, dynamic>> _users = [];
-  bool _loading = true;
+  bool _isLoading = true;
   String? _error;
 
   @override
@@ -22,7 +22,7 @@ class _UserListPageState extends State<UserListPage> {
   Future<void> _fetchUsers() async {
     try {
       setState(() {
-        _loading = true;
+        _isLoading = true;
         _error = null;
       });
 
@@ -32,7 +32,7 @@ class _UserListPageState extends State<UserListPage> {
 
       setState(() {
         _users = List<Map<String, dynamic>>.from(response);
-        _loading = false;
+        _isLoading = false;
       });
 
       debugPrint('Toplam ${_users.length} kullanıcı bulundu');
@@ -42,9 +42,9 @@ class _UserListPageState extends State<UserListPage> {
     } catch (e) {
       setState(() {
         _error = e.toString();
-        _loading = false;
+        _isLoading = false;
       });
-      debugPrint('Hata: $e');
+      debugPrint('Error: $e');
     }
   }
 
@@ -52,7 +52,7 @@ class _UserListPageState extends State<UserListPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Supabase Users Tablosu'),
+        title: const Text('Supabase Kullanıcı Tablosu'),
         backgroundColor: const Color(0xFF1a1a2e),
         foregroundColor: Colors.white,
         actions: [
@@ -68,7 +68,7 @@ class _UserListPageState extends State<UserListPage> {
   }
 
   Widget _buildBody() {
-    if (_loading) {
+    if (_isLoading) {
       return const Center(
         child: CircularProgressIndicator(color: Colors.purpleAccent),
       );
@@ -84,7 +84,7 @@ class _UserListPageState extends State<UserListPage> {
               const Icon(Icons.error_outline, color: Colors.red, size: 48),
               const SizedBox(height: 16),
               const Text(
-                'DB Bağlantı Hatası',
+                'Veritabanı Bağlantı Hatası',
                 style: TextStyle(
                   color: Colors.white,
                   fontSize: 20,
@@ -121,7 +121,7 @@ class _UserListPageState extends State<UserListPage> {
             ),
             SizedBox(height: 8),
             Text(
-              'users tablosu boş veya RLS engeli var',
+              'Kullanıcı tablosu boş veya RLS engeli var',
               style: TextStyle(color: Colors.grey, fontSize: 13),
             ),
           ],
@@ -129,20 +129,20 @@ class _UserListPageState extends State<UserListPage> {
       );
     }
 
-    // Tablo sütun isimlerini al
+    // Get table column names
     final columns = _users.first.keys.toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Bilgi kutusu
+        // Info box
         Container(
           margin: const EdgeInsets.all(16),
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: Colors.green.withOpacity(0.15),
+            color: Colors.green.withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: Colors.green.withOpacity(0.3)),
+            border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
           ),
           child: Row(
             children: [
@@ -150,7 +150,7 @@ class _UserListPageState extends State<UserListPage> {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'DB bağlantısı başarılı! ${_users.length} kullanıcı bulundu.\n'
+                  'Veritabanı bağlantısı başarılı! ${_users.length} kullanıcı bulundu.\n'
                   'Sütunlar: ${columns.join(", ")}',
                   style: const TextStyle(color: Colors.green, fontSize: 13),
                 ),
@@ -158,7 +158,7 @@ class _UserListPageState extends State<UserListPage> {
             ],
           ),
         ),
-        // Kullanıcı listesi
+        // User list
         Expanded(
           child: ListView.builder(
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -171,7 +171,7 @@ class _UserListPageState extends State<UserListPage> {
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10),
                   side: BorderSide(
-                    color: Colors.purpleAccent.withOpacity(0.3),
+                    color: Colors.purpleAccent.withValues(alpha: 0.3),
                   ),
                 ),
                 child: Padding(
@@ -179,13 +179,13 @@ class _UserListPageState extends State<UserListPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Başlık satırı
+                      // Header row
                       Row(
                         children: [
                           CircleAvatar(
                             radius: 18,
                             backgroundColor:
-                                Colors.purpleAccent.withOpacity(0.2),
+                                Colors.purpleAccent.withValues(alpha: 0.2),
                             child: Text(
                               '${index + 1}',
                               style: const TextStyle(
@@ -216,7 +216,7 @@ class _UserListPageState extends State<UserListPage> {
                         height: 1,
                       ),
                       const SizedBox(height: 10),
-                      // Tüm alanları göster
+                      // Show all fields
                       ...user.entries.map(
                         (entry) => Padding(
                           padding: const EdgeInsets.only(bottom: 6),

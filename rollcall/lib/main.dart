@@ -2,8 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:rollcall/view/login/login_page.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'view/student/student_home_page.dart';
-import 'view/teacher/teacher_home_page.dart';
+import 'view/student/pages/student_home_page.dart';
+import 'view/teacher/pages/teacher_home_page.dart';
+import 'view/teacher/pages/course_students_page.dart';
 import 'view/admin/admin_page.dart';
 
 void main() async {
@@ -35,6 +36,7 @@ class MyApp extends StatelessWidget {
         '/login': (context) => const LoginPage(),
         '/ogrenci-anasayfa': (context) => const StudentHomePage(),
         '/ogretmen-anasayfa': (context) => const TeacherHomePage(),
+        '/ogretmen-ders-detay': (context) => const CourseStudentsPage(),
         '/admin-panel': (context) => const AdminPage(),
       },
     );
