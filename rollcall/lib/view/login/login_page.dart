@@ -155,8 +155,9 @@ class _LoginPageState extends State<LoginPage>
                       _PasswordField(
                         controller: _passwordController,
                         isHidden: _isPasswordHidden,
-                        onToggleVisibility: () =>
-                            setState(() => _isPasswordHidden = !_isPasswordHidden),
+                        onToggleVisibility: () => setState(
+                          () => _isPasswordHidden = !_isPasswordHidden,
+                        ),
                       ),
                       const SizedBox(height: 12),
                       Align(
@@ -183,10 +184,7 @@ class _LoginPageState extends State<LoginPage>
                         _ErrorBanner(message: _errorMessage!),
                         const SizedBox(height: 16),
                       ],
-                      _LoginButton(
-                        isLoading: _isLoading,
-                        onPressed: _signIn,
-                      ),
+                      _LoginButton(isLoading: _isLoading, onPressed: _signIn),
                       const SizedBox(height: 40),
                       const _HelpRow(),
                       const SizedBox(height: 32),
@@ -225,7 +223,7 @@ class _LogoSection extends StatelessWidget {
         ),
         const SizedBox(height: 20),
         const Text(
-          'BEACONTrack',
+          'RollCall',
           style: TextStyle(
             color: AppColors.textPrimary,
             fontSize: 28,
@@ -361,7 +359,9 @@ class _PasswordField extends StatelessWidget {
         prefixIcon: Icons.lock_outline_rounded,
         suffixIcon: IconButton(
           icon: Icon(
-            isHidden ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+            isHidden
+                ? Icons.visibility_off_outlined
+                : Icons.visibility_outlined,
             color: AppColors.textHint,
             size: 20,
           ),

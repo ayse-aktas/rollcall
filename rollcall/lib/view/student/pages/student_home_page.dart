@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import '../../../core/utils/theme/colors/app_colors.dart';
+import 'course_attendance_detail_page.dart';
 
 // ACADEMIC TERM DATES
 final DateTime TERM_START = DateTime(2026, 2, 9);
@@ -21,20 +22,6 @@ int getScheduledDaysCount(DateTime start, DateTime end, String courseDayRaw) {
 
 // ── Translation Helpers ─────────────────────────────────
 
-String _translateDay(String? day) {
-  if (day == null) return '';
-  final days = day.split(',').map((d) => d.trim()).toList();
-  const dayMap = {
-    'Monday': 'Pazartesi',
-    'Tuesday': 'Salı',
-    'Wednesday': 'Çarşamba',
-    'Thursday': 'Perşembe',
-    'Friday': 'Cuma',
-    'Saturday': 'Cumartesi',
-    'Sunday': 'Pazar',
-  };
-  return days.map((d) => dayMap[d] ?? d).join(', ');
-}
 
 String _translateCourseName(String? name) {
   const courseMap = {
@@ -143,7 +130,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
       });
       
       // PERSIST to Supabase
-      final response = await _supabase
+      await _supabase
           .from('notifications')
           .update({'is_read': true})
           .inFilter('id', unreadIds);
@@ -399,7 +386,6 @@ class _NotificationSheet extends StatefulWidget {
   final Function(String) onMarkRead;
   
   const _NotificationSheet({
-    super.key,
     required this.notifications, 
     required this.onMarkAllRead,
     required this.onMarkRead,
@@ -568,7 +554,6 @@ class _CourseCard extends StatefulWidget {
 }
 
 class _CourseCardState extends State<_CourseCard> {
-  bool _isLoading = true;
   int _total = 0, _attended = 0;
   double _rate = 0;
 
@@ -580,16 +565,25 @@ class _CourseCardState extends State<_CourseCard> {
 
   Future<void> _loadStats() async {
     final sb = Supabase.instance.client;
-    final id = widget.course['id'].toString();
-    final day = widget.course['course_day'] ?? '';
-    final total = getScheduledDaysCount(TERM_START, TERM_END, day);
-    final recs = await sb.from('attendance').select().eq('course_id', id).eq('student_id', widget.studentId).eq('is_present', true);
+    final id = widget.course['id'];
+    
+    // Fetch ALL attendance records for this student and course directly from DB
+    final response = await sb
+        .from('attendance')
+        .select()
+        .eq('course_id', id)
+        .eq('student_id', widget.studentId);
+    
     if (!mounted) return;
+    
+    final List<Map<String, dynamic>> allRecs = List<Map<String, dynamic>>.from(response);
+    final attended = allRecs.where((r) => r['is_present'] == true).length;
+    final total = allRecs.length;
+
     setState(() {
       _total = total;
-      _attended = recs.length;
+      _attended = attended;
       _rate = total > 0 ? (_attended / total) * 100 : 0;
-      _isLoading = false;
     });
   }
 
@@ -601,60 +595,121 @@ class _CourseCardState extends State<_CourseCard> {
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
-          BoxShadow(color: AppColors.primary.withValues(alpha: 0.08), blurRadius: 15, offset: const Offset(0, 5)),
+          BoxShadow(
+            color: AppColors.primary.withValues(alpha: 0.08),
+            blurRadius: 15,
+            offset: const Offset(0, 5),
+          ),
         ],
       ),
-      child: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(20),
-            child: Row(
-              children: [
-                Container(
-                  width: 50, height: 50,
-                  decoration: BoxDecoration(
-                    color: AppColors.primaryLight,
-                    borderRadius: BorderRadius.circular(15),
-                  ),
-                  child: const Icon(Icons.school_rounded, color: AppColors.primary),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => CourseAttendanceDetailPage(
+                  course: widget.course,
+                  studentId: widget.studentId,
                 ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(_translateCourseName(widget.course['course_name']), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: AppColors.textPrimary)),
-                      const SizedBox(height: 2),
-                      Text(widget.course['course_code'] ?? '', style: const TextStyle(color: AppColors.textSecondary, fontSize: 13, fontWeight: FontWeight.w500)),
-                    ],
-                  ),
+              ),
+            );
+          },
+          borderRadius: BorderRadius.circular(20),
+          child: Column(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(20),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 50,
+                      height: 50,
+                      decoration: BoxDecoration(
+                        color: AppColors.primaryLight,
+                        borderRadius: BorderRadius.circular(15),
+                      ),
+                      child: const Icon(Icons.school_rounded, color: AppColors.primary),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _translateCourseName(widget.course['course_name']),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 16,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            widget.course['course_code'] ?? '',
+                            style: const TextStyle(
+                              color: AppColors.textSecondary,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: _rate >= 70
+                            ? AppColors.success.withValues(alpha: 0.1)
+                            : AppColors.warning.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        '%${_rate.toStringAsFixed(1)}',
+                        style: TextStyle(
+                          color: _rate >= 70 ? AppColors.success : AppColors.warning,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: _rate >= 70 ? AppColors.success.withValues(alpha: 0.1) : AppColors.warning.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text('%${_rate.toStringAsFixed(1)}', style: TextStyle(color: _rate >= 70 ? AppColors.success : AppColors.warning, fontWeight: FontWeight.w900, fontSize: 16)),
+              ),
+              Container(
+                height: 1,
+                color: AppColors.border.withValues(alpha: 0.6),
+                margin: const EdgeInsets.symmetric(horizontal: 20),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(20),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _StatItem(
+                      label: 'Dönem Toplam',
+                      value: '$_total',
+                      icon: Icons.calendar_month_rounded,
+                    ),
+                    _StatItem(
+                      label: 'Katılım',
+                      value: '$_attended',
+                      icon: Icons.check_rounded,
+                      color: AppColors.success,
+                    ),
+                    _StatItem(
+                      label: 'Devamsızlık',
+                      value: '${_total - _attended}',
+                      icon: Icons.close_rounded,
+                      color: AppColors.error,
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              )
+            ],
           ),
-          Container(
-            height: 1, color: AppColors.border.withValues(alpha: 0.6), margin: const EdgeInsets.symmetric(horizontal: 20),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(20),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                _StatItem(label: 'Dönem Toplam', value: '$_total', icon: Icons.calendar_month_rounded),
-                _StatItem(label: 'Katılım', value: '$_attended', icon: Icons.check_rounded, color: AppColors.success),
-                _StatItem(label: 'Devamsızlık', value: '${_total - _attended}', icon: Icons.close_rounded, color: AppColors.error),
-              ],
-            ),
-          )
-        ],
+        ),
       ),
     );
   }
