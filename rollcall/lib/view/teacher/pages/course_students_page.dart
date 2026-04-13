@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/utils/theme/colors/app_colors.dart';
 import 'package:intl/intl.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import 'dart:convert';
+import 'dart:async';
 
 // ACADEMIC TERM DATES
 final DateTime TERM_START = DateTime(2026, 2, 9);
@@ -179,6 +182,21 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
     }
   }
 
+  void _showQRCode() {
+    if (_course == null) return;
+    
+    final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
+    
+    showDialog(
+      context: context,
+      builder: (context) => _QRDisplayDialog(
+        courseId: _course!['id'],
+        courseName: _translateCourseName(_course?['course_name']),
+        dateStr: dateStr,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final courseName = _course != null ? _course!['course_name'] : 'Ders Detayı';
@@ -202,6 +220,13 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
           _translateCourseName(courseName),
           style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.qr_code_2_rounded, color: Colors.white),
+            onPressed: isCorrectDay ? _showQRCode : null,
+          ),
+          const SizedBox(width: 8),
+        ],
       ),
       body: Column(
         children: [
@@ -366,6 +391,162 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                   ),
           ),
         ],
+      ),
+      floatingActionButton: isCorrectDay
+          ? FloatingActionButton.extended(
+              onPressed: _showQRCode,
+              backgroundColor: AppColors.primary,
+              icon: const Icon(Icons.qr_code_2_rounded, color: Colors.white),
+              label: const Text('QR Oluştur', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            )
+          : null,
+    );
+  }
+}
+
+class _QRDisplayDialog extends StatefulWidget {
+  final String courseId;
+  final String courseName;
+  final String dateStr;
+
+  const _QRDisplayDialog({
+    required this.courseId,
+    required this.courseName,
+    required this.dateStr,
+  });
+
+  @override
+  State<_QRDisplayDialog> createState() => _QRDisplayDialogState();
+}
+
+class _QRDisplayDialogState extends State<_QRDisplayDialog> {
+  late String _qrData;
+  Timer? _timer;
+  int _secondsLeft = 60;
+
+  @override
+  void initState() {
+    super.initState();
+    _generateData();
+    _startTimer();
+  }
+
+  void _generateData() {
+    setState(() {
+      _qrData = jsonEncode({
+        'type': 'attendance_qr',
+        'course_id': widget.courseId,
+        'date': widget.dateStr,
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      });
+      _secondsLeft = 60;
+    });
+  }
+
+  void _startTimer() {
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_secondsLeft > 0) {
+        setState(() => _secondsLeft--);
+      } else {
+        _generateData();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Yoklama QR Kodu',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '${widget.courseName} - ${widget.dateStr}',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 24),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.1),
+                    blurRadius: 10,
+                  ),
+                ],
+              ),
+              child: QrImageView(
+                data: _qrData,
+                version: QrVersions.auto,
+                size: 220.0,
+                eyeStyle: const QrEyeStyle(
+                  eyeShape: QrEyeShape.square,
+                  color: AppColors.primary,
+                ),
+                dataModuleStyle: const QrDataModuleStyle(
+                  dataModuleShape: QrDataModuleShape.square,
+                  color: AppColors.primary,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.timer_outlined, size: 14, color: AppColors.textSecondary),
+                const SizedBox(width: 4),
+                Text(
+                  'QR kod $_secondsLeft saniye sonra yenilenecek',
+                  style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'Öğrenciler bu kodu okutarak yoklama verebilirler.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                child: const Text(
+                  'Kapat',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import '../../../core/utils/theme/colors/app_colors.dart';
 import 'course_attendance_detail_page.dart';
+import 'qr_scanner_page.dart';
 
 // ACADEMIC TERM DATES
 final DateTime TERM_START = DateTime(2026, 2, 9);
@@ -258,6 +259,17 @@ class _StudentHomePageState extends State<StudentHomePage> {
                 ),
               ),
             ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => const QRScannerPage()),
+          );
+        },
+        backgroundColor: AppColors.primary,
+        icon: const Icon(Icons.qr_code_scanner_rounded, color: Colors.white),
+        label: const Text('QR Okut', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+      ),
     );
   }
 }

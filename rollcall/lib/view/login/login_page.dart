@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
 import '../../core/utils/theme/colors/app_colors.dart';
+
+enum LoginType { student, teacher }
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -14,38 +15,32 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage>
     with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
-  final _schoolNoController = TextEditingController();
+  final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
 
+  LoginType _loginType = LoginType.student;
   bool _isPasswordHidden = true;
   bool _isLoading = false;
   String? _errorMessage;
 
   late AnimationController _animController;
   late Animation<double> _fadeAnim;
-  late Animation<Offset> _slideAnim;
-
-  static const _emailDomain = '@ogr.sakarya.edu.tr';
 
   @override
   void initState() {
     super.initState();
     _animController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 900),
+      duration: const Duration(milliseconds: 800),
     );
-    _fadeAnim = CurvedAnimation(parent: _animController, curve: Curves.easeOut);
-    _slideAnim = Tween<Offset>(begin: const Offset(0, 0.08), end: Offset.zero)
-        .animate(
-          CurvedAnimation(parent: _animController, curve: Curves.easeOutCubic),
-        );
+    _fadeAnim = CurvedAnimation(parent: _animController, curve: Curves.easeIn);
     _animController.forward();
   }
 
   @override
   void dispose() {
     _animController.dispose();
-    _schoolNoController.dispose();
+    _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
@@ -59,9 +54,14 @@ class _LoginPageState extends State<LoginPage>
     });
 
     try {
-      final schoolNo = _schoolNoController.text.trim().toLowerCase();
+      final input = _emailController.text.trim();
       final password = _passwordController.text;
-      final email = '$schoolNo$_emailDomain';
+
+      // Auto-append domain for student if only number is entered
+      String email = input;
+      if (_loginType == LoginType.student && !input.contains('@')) {
+        email = '$input@ogr.sakarya.edu.tr';
+      }
 
       final response = await Supabase.instance.client.auth.signInWithPassword(
         email: email,
@@ -75,453 +75,429 @@ class _LoginPageState extends State<LoginPage>
         return;
       }
 
+      // Fetch role from profile
       final user = await Supabase.instance.client
           .from('users')
           .select('role')
-          .eq('school_no', schoolNo)
+          .eq('id', response.user!.id)
           .single();
 
       if (!mounted) return;
 
-      switch (user['role'] as String) {
-        case 'student':
-          Navigator.pushReplacementNamed(context, '/ogrenci-anasayfa');
-          break;
-        case 'teacher':
-          Navigator.pushReplacementNamed(context, '/ogretmen-anasayfa');
-          break;
-        case 'admin':
-          Navigator.pushReplacementNamed(context, '/admin-panel');
-          break;
-        default:
-          setState(() => _errorMessage = 'Tanımsız kullanıcı rolü.');
+      final role = user['role'] as String;
+      if (role == 'student') {
+        Navigator.pushReplacementNamed(context, '/ogrenci-anasayfa');
+      } else if (role == 'teacher') {
+        Navigator.pushReplacementNamed(context, '/ogretmen-anasayfa');
+      } else if (role == 'admin') {
+        Navigator.pushReplacementNamed(context, '/admin-panel');
       }
     } on AuthException catch (e) {
-      debugPrint('Supabase auth error: ${e.message}');
       setState(() => _errorMessage = _translateAuthError(e.message));
     } catch (e) {
-      debugPrint('Unexpected login error: $e');
-      setState(
-        () => _errorMessage =
-            'Beklenmeyen bir hata oluştu. Lütfen tekrar deneyin.',
-      );
+      setState(() => _errorMessage = 'Beklenmeyen bir hata oluştu.');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
   String _translateAuthError(String message) {
-    if (message.contains('Invalid login credentials')) {
-      return 'Okul numarası veya şifre hatalı.';
-    }
-    if (message.contains('Email not confirmed')) {
-      return 'Hesabınız henüz onaylanmamış.';
-    }
-    if (message.contains('Too many requests')) {
-      return 'Çok fazla deneme yaptınız. Lütfen bekleyin.';
-    }
+    if (message.contains('Invalid login credentials'))
+      return 'E-posta veya şifre hatalı.';
     return 'Giriş yapılamadı. Lütfen tekrar deneyin.';
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: const Color(0xFFF8FAFF),
       body: AnnotatedRegion<SystemUiOverlayStyle>(
-        value: SystemUiOverlayStyle.light,
-        child: SafeArea(
-          child: FadeTransition(
-            opacity: _fadeAnim,
-            child: SlideTransition(
-              position: _slideAnim,
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 28),
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const SizedBox(height: 56),
-                      const _LogoSection(),
-                      const SizedBox(height: 52),
-                      const _LabelText('Okul Numarası'),
-                      const SizedBox(height: 8),
-                      _SchoolNoField(controller: _schoolNoController),
-                      const SizedBox(height: 4),
-                      _DomainPreview(controller: _schoolNoController),
-                      const SizedBox(height: 16),
-                      const _LabelText('Şifre'),
-                      const SizedBox(height: 8),
-                      _PasswordField(
-                        controller: _passwordController,
-                        isHidden: _isPasswordHidden,
-                        onToggleVisibility: () => setState(
-                          () => _isPasswordHidden = !_isPasswordHidden,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: TextButton(
-                          onPressed: () =>
-                              Navigator.pushNamed(context, '/sifre-sifirla'),
-                          style: TextButton.styleFrom(
-                            padding: EdgeInsets.zero,
-                            minimumSize: const Size(0, 36),
-                          ),
-                          child: const Text(
-                            'Şifremi Unuttum',
-                            style: TextStyle(
-                              color: AppColors.primary,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      if (_errorMessage != null) ...[
-                        _ErrorBanner(message: _errorMessage!),
-                        const SizedBox(height: 16),
-                      ],
-                      _LoginButton(isLoading: _isLoading, onPressed: _signIn),
-                      const SizedBox(height: 40),
-                      const _HelpRow(),
-                      const SizedBox(height: 32),
-                    ],
-                  ),
-                ),
-              ),
+        value: SystemUiOverlayStyle.dark,
+        child: FadeTransition(
+          opacity: _fadeAnim,
+          child: SingleChildScrollView(
+            child: Column(
+              children: [
+                const SizedBox(height: 60),
+                _buildLogoHeader(),
+                const SizedBox(height: 30),
+                _buildLoginCard(),
+                const SizedBox(height: 40),
+                _buildFooterLinks(),
+                const SizedBox(height: 20),
+              ],
             ),
           ),
         ),
       ),
     );
   }
-}
 
-class _LogoSection extends StatelessWidget {
-  const _LogoSection();
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 52,
-          height: 52,
-          decoration: BoxDecoration(
-            color: AppColors.surfaceLight,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppColors.borderPrimary, width: 1),
-          ),
-          child: const Icon(
-            Icons.wifi_tethering_rounded,
-            color: AppColors.primary,
-            size: 28,
-          ),
-        ),
-        const SizedBox(height: 20),
-        const Text(
-          'RollCall',
-          style: TextStyle(
-            color: AppColors.textPrimary,
-            fontSize: 28,
-            fontWeight: FontWeight.w700,
-            letterSpacing: -0.5,
-          ),
-        ),
-        const SizedBox(height: 6),
-        const Text(
-          'Okul numaranız ile giriş yapın',
-          style: TextStyle(color: AppColors.textSecondary, fontSize: 15),
-        ),
-      ],
-    );
-  }
-}
-
-class _LabelText extends StatelessWidget {
-  final String text;
-  const _LabelText(this.text);
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: const TextStyle(
-        color: AppColors.textSecondary,
-        fontSize: 13,
-        fontWeight: FontWeight.w500,
-        letterSpacing: 0.3,
-      ),
-    );
-  }
-}
-
-class _DomainPreview extends StatefulWidget {
-  final TextEditingController controller;
-  const _DomainPreview({required this.controller});
-  @override
-  State<_DomainPreview> createState() => _DomainPreviewState();
-}
-
-class _DomainPreviewState extends State<_DomainPreview> {
-  static final _regex = RegExp(r'^[a-zA-Z]\d{9}$');
-
-  @override
-  void initState() {
-    super.initState();
-    widget.controller.addListener(() => setState(() {}));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final value = widget.controller.text.trim().toLowerCase();
-    if (value.isEmpty) return const SizedBox.shrink();
-    final isValid = _regex.hasMatch(value);
-    return Row(
-      children: [
-        Icon(
-          isValid ? Icons.check_circle_outline : Icons.info_outline,
-          size: 13,
-          color: isValid ? AppColors.success : AppColors.textHint,
-        ),
-        const SizedBox(width: 6),
-        Text(
-          isValid ? '$value@ogr.sakarya.edu.tr' : 'Format: b221210036',
-          style: TextStyle(
-            color: isValid ? AppColors.success : AppColors.textHint,
-            fontSize: 12,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _SchoolNoField extends StatelessWidget {
-  final TextEditingController controller;
-  static final _regex = RegExp(r'^[a-zA-Z]\d{9}$');
-  const _SchoolNoField({required this.controller});
-
-  @override
-  Widget build(BuildContext context) {
-    return TextFormField(
-      controller: controller,
-      keyboardType: TextInputType.text,
-      textCapitalization: TextCapitalization.none,
-      autocorrect: false,
-      inputFormatters: [
-        LengthLimitingTextInputFormatter(10),
-        FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9]')),
-      ],
-      style: const TextStyle(
-        color: AppColors.textPrimary,
-        fontSize: 16,
-        fontWeight: FontWeight.w500,
-        letterSpacing: 1.2,
-      ),
-      decoration: _buildInputDecoration(
-        hint: 'b221210036',
-        prefixIcon: Icons.badge_outlined,
-      ),
-      validator: (value) {
-        if (value == null || value.trim().isEmpty) {
-          return 'Okul numarası boş bırakılamaz';
-        }
-        if (!_regex.hasMatch(value.trim())) {
-          return 'Geçersiz format. Örnek: b221210036';
-        }
-        return null;
-      },
-    );
-  }
-}
-
-class _PasswordField extends StatelessWidget {
-  final TextEditingController controller;
-  final bool isHidden;
-  final VoidCallback onToggleVisibility;
-  const _PasswordField({
-    required this.controller,
-    required this.isHidden,
-    required this.onToggleVisibility,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return TextFormField(
-      controller: controller,
-      obscureText: isHidden,
-      style: const TextStyle(color: AppColors.textPrimary, fontSize: 16),
-      decoration: _buildInputDecoration(
-        hint: '••••••••',
-        prefixIcon: Icons.lock_outline_rounded,
-        suffixIcon: IconButton(
-          icon: Icon(
-            isHidden
-                ? Icons.visibility_off_outlined
-                : Icons.visibility_outlined,
-            color: AppColors.textHint,
-            size: 20,
-          ),
-          onPressed: onToggleVisibility,
-        ),
-      ),
-      validator: (value) {
-        if (value == null || value.isEmpty) return 'Şifre boş bırakılamaz';
-        if (value.length < 6) return 'Şifre en az 6 karakter olmalıdır';
-        return null;
-      },
-    );
-  }
-}
-
-class _ErrorBanner extends StatelessWidget {
-  final String message;
-  const _ErrorBanner({required this.message});
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-      decoration: BoxDecoration(
-        color: AppColors.errorBg,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.errorBorder, width: 1),
-      ),
+  Widget _buildLogoHeader() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 40),
       child: Row(
         children: [
-          const Icon(
-            Icons.error_outline_rounded,
-            color: AppColors.error,
-            size: 18,
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF0052D4).withValues(alpha: 0.1),
+                  blurRadius: 20,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+            ),
+            child: const Icon(
+              Icons.wifi_tethering_rounded,
+              color: Color(0xFF1E60D2),
+              size: 28,
+            ),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              message,
-              style: const TextStyle(color: AppColors.errorText, fontSize: 13),
+          const SizedBox(width: 12),
+          const Text(
+            'RollCall',
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.w900,
+              color: Color(0xFF003CBF),
+              letterSpacing: -0.5,
             ),
           ),
         ],
       ),
     );
   }
-}
 
-class _LoginButton extends StatelessWidget {
-  final bool isLoading;
-  final VoidCallback onPressed;
-  const _LoginButton({required this.isLoading, required this.onPressed});
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      height: 52,
-      child: ElevatedButton(
-        onPressed: isLoading ? null : onPressed,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: AppColors.primary,
-          disabledBackgroundColor: AppColors.primary.withValues(alpha: 0.4),
-          foregroundColor: AppColors.textPrimary,
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+  Widget _buildLoginCard() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 24),
+      padding: const EdgeInsets.all(32),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(32),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 30,
+            offset: const Offset(0, 15),
           ),
-        ),
-        child: isLoading
-            ? const SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2.5,
-                  valueColor: AlwaysStoppedAnimation<Color>(
-                    AppColors.textPrimary,
+        ],
+      ),
+      child: Form(
+        key: _formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'RollCall\'a Hoş Geldiniz',
+              style: TextStyle(
+                fontSize: 28,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF1A1D1F),
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Sisteme erişmek ve yoklama işlemlerine katılmak için lütfen bilgilerinizi doğrulayın.',
+              style: TextStyle(
+                fontSize: 14,
+                color: Color(0xFF6F767E),
+                height: 1.5,
+              ),
+            ),
+            const SizedBox(height: 32),
+            _buildTypeToggle(),
+            const SizedBox(height: 32),
+            const Text(
+              'KURUMSAL E-POSTA',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF1A1D1F),
+                letterSpacing: 0.5,
+              ),
+            ),
+            const SizedBox(height: 12),
+            _buildTextField(
+              controller: _emailController,
+              hint: _loginType == LoginType.student
+                  ? 'b221210036@ogr.sakarya.edu.tr'
+                  : 'ad.soyad@universite.edu.tr',
+              prefixIcon: Icons.email_outlined,
+            ),
+            const SizedBox(height: 24),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'ŞİFRE',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF1A1D1F),
+                    letterSpacing: 0.5,
                   ),
                 ),
-              )
-            : const Text(
-                'Giriş Yap',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.3,
+                TextButton(
+                  onPressed: () {},
+                  child: const Text(
+                    'Şifremi Unuttum?',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF1E60D2),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            _buildTextField(
+              controller: _passwordController,
+              hint: '••••••••',
+              isPassword: true,
+              prefixIcon: Icons.lock_outline_rounded,
+            ),
+            const SizedBox(height: 32),
+            if (_errorMessage != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: Text(
+                  _errorMessage!,
+                  style: const TextStyle(color: Colors.red, fontSize: 13),
                 ),
               ),
-      ),
-    );
-  }
-}
-
-class _HelpRow extends StatelessWidget {
-  const _HelpRow();
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Text.rich(
-        TextSpan(
-          text: 'Hesabınızla ilgili sorun mu var?  ',
-          style: const TextStyle(color: AppColors.textHint, fontSize: 13),
-          children: [
-            WidgetSpan(
-              child: GestureDetector(
-                onTap: () => Navigator.pushNamed(context, '/yardim'),
-                child: const Text(
-                  'Yardım Al',
-                  style: TextStyle(
-                    color: AppColors.primary,
+            _buildSignInButton(),
+            const SizedBox(height: 32),
+            Center(
+              child: Text.rich(
+                TextSpan(
+                  text: "Hesabınız yok mu? ",
+                  style: const TextStyle(
+                    color: Color(0xFF6F767E),
                     fontSize: 13,
-                    fontWeight: FontWeight.w500,
                   ),
+                  children: [
+                    TextSpan(
+                      text: "Bölümünüzden erişim talep edin.",
+                      style: const TextStyle(
+                        color: Color(0xFF1E60D2),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
                 ),
+                textAlign: TextAlign.center,
               ),
             ),
           ],
         ),
-        textAlign: TextAlign.center,
       ),
     );
   }
-}
 
-InputDecoration _buildInputDecoration({
-  required String hint,
-  required IconData prefixIcon,
-  Widget? suffixIcon,
-}) {
-  return InputDecoration(
-    hintText: hint,
-    hintStyle: const TextStyle(
-      color: AppColors.textHint,
-      fontSize: 15,
-      letterSpacing: 0.5,
-    ),
-    filled: true,
-    fillColor: AppColors.surface,
-    prefixIcon: Icon(prefixIcon, color: AppColors.textSecondary, size: 20),
-    suffixIcon: suffixIcon,
-    border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
-      borderSide: const BorderSide(color: AppColors.border, width: 1),
-    ),
-    enabledBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
-      borderSide: const BorderSide(color: AppColors.border, width: 1),
-    ),
-    focusedBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
-      borderSide: const BorderSide(color: AppColors.borderFocus, width: 1.5),
-    ),
-    errorBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
-      borderSide: const BorderSide(color: AppColors.error, width: 1),
-    ),
-    focusedErrorBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
-      borderSide: const BorderSide(color: AppColors.error, width: 1.5),
-    ),
-    errorStyle: const TextStyle(color: AppColors.errorText, fontSize: 12),
-    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-  );
+  Widget _buildTypeToggle() {
+    return Container(
+      height: 50,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF4F7FF),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Expanded(child: _buildToggleItem(LoginType.student, 'Öğrenci')),
+          Expanded(child: _buildToggleItem(LoginType.teacher, 'Akademisyen')),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildToggleItem(LoginType type, String label) {
+    final isSelected = _loginType == type;
+    return GestureDetector(
+      onTap: () => setState(() => _loginType = type),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: isSelected ? Colors.white : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+          boxShadow: isSelected
+              ? [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.05),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ]
+              : null,
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            color: isSelected
+                ? const Color(0xFF1E60D2)
+                : const Color(0xFF6F767E),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTextField({
+    required TextEditingController controller,
+    required String hint,
+    required IconData prefixIcon,
+    bool isPassword = false,
+  }) {
+    return TextFormField(
+      controller: controller,
+      obscureText: isPassword && _isPasswordHidden,
+      style: const TextStyle(
+        fontSize: 15,
+        fontWeight: FontWeight.w500,
+        color: Color(0xFF1A1D1F),
+      ),
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle: const TextStyle(color: Color(0xFFA6ADBB), fontSize: 15),
+        filled: true,
+        fillColor: const Color(0xFFE8F0FE),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide.none,
+        ),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 16,
+        ),
+        suffixIcon: isPassword
+            ? IconButton(
+                icon: Icon(
+                  _isPasswordHidden
+                      ? Icons.visibility_outlined
+                      : Icons.visibility_off_outlined,
+                  color: const Color(0xFF6F767E),
+                  size: 20,
+                ),
+                onPressed: () =>
+                    setState(() => _isPasswordHidden = !_isPasswordHidden),
+              )
+            : null,
+      ),
+      validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
+    );
+  }
+
+  Widget _buildSignInButton() {
+    return SizedBox(
+      width: double.infinity,
+      height: 56,
+      child: ElevatedButton(
+        onPressed: _isLoading ? null : _signIn,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFF1A56CC),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          elevation: 0,
+        ),
+        child: _isLoading
+            ? const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  color: Colors.white,
+                  strokeWidth: 3,
+                ),
+              )
+            : const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    'GİRİŞ YAP',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                  SizedBox(width: 8),
+                  Icon(
+                    Icons.arrow_forward_rounded,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+
+  Widget _buildFooterLinks() {
+    return Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _footerIcon(Icons.link),
+            const SizedBox(width: 20),
+            _footerIcon(Icons.language),
+            const SizedBox(width: 20),
+            _footerIcon(Icons.home_outlined),
+          ],
+        ),
+        const SizedBox(height: 40),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 40),
+          child: Column(
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  _footerText('© 2024 ROLLCALL SİSTEMLERİ.', width: 100),
+                  _footerText('GİZLİLİK POLİTİKASI'),
+                  _footerText('SİSTEM DURUMU'),
+                  _footerText('BEACON AĞI ÇEVRİMİÇİ'),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _footerIcon(IconData icon) {
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFBCC1CD),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Icon(icon, color: Colors.white, size: 18),
+    );
+  }
+
+  Widget _footerText(String text, {double? width}) {
+    return SizedBox(
+      width: width ?? 60,
+      child: Text(
+        text,
+        style: const TextStyle(
+          fontSize: 9,
+          fontWeight: FontWeight.w700,
+          color: Color(0xFF6F767E),
+          height: 1.4,
+        ),
+      ),
+    );
+  }
 }

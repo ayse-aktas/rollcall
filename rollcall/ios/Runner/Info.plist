@@ -45,5 +45,7 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>QR kod okumak için kameraya erişim gerekiyor.</string>
 </dict>
 </plist>
