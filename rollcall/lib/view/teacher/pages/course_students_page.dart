@@ -68,7 +68,7 @@ String _formatTimeRange(String? startTime, String? endTime) {
     final startParts = startTime.split(':');
     final startH = int.parse(startParts[0]);
     final startM = startParts[1];
-    
+
     String endDisplay;
     if (endTime != null && endTime.isNotEmpty) {
       final endParts = endTime.split(':');
@@ -77,7 +77,7 @@ String _formatTimeRange(String? startTime, String? endTime) {
       final endHour = (startH + 3) % 24;
       endDisplay = '${endHour.toString().padLeft(2, '0')}:$startM';
     }
-    
+
     return '${startH.toString().padLeft(2, '0')}:$startM - $endDisplay';
   } catch (e) {
     return startTime;
@@ -201,10 +201,10 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
     try {
       final String startTimeStr = _course!['course_time'] ?? '00:00:00';
       final String endTimeStr = _course!['course_end_time'] ?? '00:00:00';
-      
+
       final startParts = startTimeStr.split(':');
       final endParts = endTimeStr.split(':');
-      
+
       final int startH = int.parse(startParts[0]);
       final int startM = int.parse(startParts[1]);
       final int endH = int.parse(endParts[0]);
@@ -294,7 +294,11 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
             icon: const Icon(Icons.analytics_outlined, color: Colors.white),
             onPressed: () {
               if (_course != null) {
-                Navigator.pushNamed(context, '/ogretmen-analiz', arguments: _course);
+                Navigator.pushNamed(
+                  context,
+                  '/ogretmen-analiz',
+                  arguments: _course,
+                );
               }
             },
           ),
