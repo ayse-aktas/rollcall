@@ -90,7 +90,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
       final enrollments = await _supabase
           .from('student_courses')
           .select(
-            'course_id, courses(id, course_name, course_code, course_day, course_time)',
+            'course_id, courses(id, course_name, course_code, course_day, course_time, course_end_time)',
           )
           .eq('student_id', uid);
 
@@ -544,6 +544,10 @@ class _SectionTitle extends StatelessWidget {
   }
 }
 
+// ACADEMIC TERM DATES
+final DateTime termStart = DateTime(2026, 2, 9);
+final DateTime termEnd = DateTime(2026, 6, 12);
+
 class _CourseList extends StatelessWidget {
   final List<Map<String, dynamic>> courses;
   final String studentId;
@@ -566,7 +570,7 @@ class _CourseCard extends StatefulWidget {
 }
 
 class _CourseCardState extends State<_CourseCard> {
-  int _total = 0, _attended = 0;
+  int _total = 0, _attended = 0, _missed = 0;
   double _rate = 0;
 
   @override
@@ -579,23 +583,77 @@ class _CourseCardState extends State<_CourseCard> {
     final sb = Supabase.instance.client;
     final id = widget.course['id'];
     
-    // Fetch ALL attendance records for this student and course directly from DB
+    // 1. Fetch ALL attendance records for this student and course
     final response = await sb
         .from('attendance')
         .select()
         .eq('course_id', id)
         .eq('student_id', widget.studentId);
     
+    final Map<String, bool> attendanceMap = {};
+    for (var rec in response) {
+      attendanceMap[rec['date']] = rec['is_present'] ?? false;
+    }
+
+    // 2. Calculate full term stats
+    final courseDayRaw = widget.course['course_day'] ?? '';
+    final List<String> scheduledDays = courseDayRaw.toString().toLowerCase().split(',').map((e) => e.trim()).toList();
+    
+    int semesterTotal = 0;
+    int attendedSessions = 0;
+    int missedSessions = 0;
+
+    final DateTime now = DateTime.now();
+    final DateTime today = DateTime(now.year, now.month, now.day);
+
+    for (DateTime d = termStart; d.isBefore(termEnd) || DateUtils.isSameDay(d, termEnd); d = d.add(const Duration(days: 1))) {
+      final dayEnglish = DateFormat('EEEE').format(d).toLowerCase();
+      if (scheduledDays.contains(dayEnglish)) {
+        semesterTotal++;
+        final dateStr = DateFormat('yyyy-MM-dd').format(d);
+        final bool? isPresentInDb = attendanceMap[dateStr];
+
+        if (isPresentInDb != null) {
+          if (isPresentInDb) {
+            attendedSessions++;
+          } else {
+            missedSessions++;
+          }
+        } else if (DateUtils.isSameDay(d, today)) {
+          // Check if class time has passed for today
+          try {
+            final String startStr = widget.course['course_time'] ?? '00:00:00';
+            final String endStr = widget.course['course_end_time'] ?? '00:00:00';
+            
+            final startParts = startStr.split(':');
+            final endParts = endStr.split(':');
+            
+            final startTotal = int.parse(startParts[0]) * 60 + int.parse(startParts[1]);
+            int endTotal = int.parse(endParts[0]) * 60 + int.parse(endParts[1]);
+            if (endTotal <= startTotal) endTotal = startTotal + 180;
+            
+            final nowTotal = now.hour * 60 + now.minute;
+            
+            if (nowTotal > endTotal) {
+              missedSessions++;
+            }
+          } catch (_) {}
+        } else if (d.isBefore(today)) {
+          // Date passed but no record
+          missedSessions++;
+        }
+      }
+    }
+
     if (!mounted) return;
     
-    final List<Map<String, dynamic>> allRecs = List<Map<String, dynamic>>.from(response);
-    final attended = allRecs.where((r) => r['is_present'] == true).length;
-    final total = allRecs.length;
-
     setState(() {
-      _total = total;
-      _attended = attended;
-      _rate = total > 0 ? (_attended / total) * 100 : 0;
+      _total = semesterTotal;
+      _attended = attendedSessions;
+      _missed = missedSessions;
+      // Rate is sessions attended out of sessions that have occurred so far
+      final occurred = _attended + _missed;
+      _rate = occurred > 0 ? (_attended / occurred) * 100 : 100;
     });
   }
 
@@ -712,7 +770,7 @@ class _CourseCardState extends State<_CourseCard> {
                     ),
                     _StatItem(
                       label: 'Devamsızlık',
-                      value: '${_total - _attended}',
+                      value: '$_missed',
                       icon: Icons.close_rounded,
                       color: AppColors.error,
                     ),

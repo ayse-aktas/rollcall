@@ -37,22 +37,29 @@ class _QRScannerPageState extends State<QRScannerPage> {
       // 1. Check if student is enrolled in this course
       final enrollment = await supabase
           .from('student_courses')
-          .select()
+          .select('course_id')
           .eq('student_id', studentId)
           .eq('course_id', courseId)
           .maybeSingle();
 
       if (enrollment == null) {
-        throw 'Bu dersin kayıtlı öğrencisi değilsiniz.';
+        throw 'Bu derse kayıtlı değilsiniz. Lütfen doğru dersin QR kodunu okuttuğunuzdan emin olun.';
       }
 
       // 2. Record attendance
-      await supabase.from('attendance').upsert({
-        'student_id': studentId,
-        'course_id': courseId,
-        'date': date,
-        'is_present': true,
-      }, onConflict: 'student_id, course_id, date');
+      try {
+        await supabase.from('attendance').upsert({
+          'student_id': studentId,
+          'course_id': courseId,
+          'date': date,
+          'is_present': true,
+        }, onConflict: 'student_id, course_id, date');
+      } on PostgrestException catch (e) {
+        if (e.code == '42501') {
+          throw 'Yoklama kaydedilemedi. Veritabanı yetki hatası (RLS). Lütfen yöneticinizle iletişime geçin.';
+        }
+        rethrow;
+      }
 
       if (!mounted) return;
       
@@ -62,9 +69,18 @@ class _QRScannerPageState extends State<QRScannerPage> {
       );
     } catch (e) {
       if (!mounted) return;
+      
+      String errorMessage = e.toString();
+      // Remove "Exception: " prefix if exists
+      if (errorMessage.startsWith('Exception: ')) {
+        errorMessage = errorMessage.substring(11);
+      } else if (errorMessage.contains('PostgrestException')) {
+        errorMessage = 'Veritabanı bağlantı hatası oluştu.';
+      }
+      
       _showResultDialog(
         success: false,
-        message: e.toString(),
+        message: errorMessage,
       );
     } finally {
       if (mounted) setState(() => _isProcessing = false);

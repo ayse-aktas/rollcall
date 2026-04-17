@@ -9,7 +9,9 @@ import 'firebase_options.dart';
 import 'view/student/pages/student_home_page.dart';
 import 'view/teacher/pages/teacher_home_page.dart';
 import 'view/teacher/pages/course_students_page.dart';
+import 'view/teacher/pages/teacher_analytics_page.dart';
 import 'view/admin/admin_page.dart';
+import 'view/splash/splash_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -27,9 +29,7 @@ void main() async {
   await Supabase.initialize(url: supabaseUrl, anonKey: supabaseAnonKey);
 
   // Firebase ve Bildirimlerin Hazırlanması
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   await _setupNotifications();
 
   runApp(const MyApp());
@@ -39,11 +39,7 @@ Future<void> _setupNotifications() async {
   FirebaseMessaging messaging = FirebaseMessaging.instance;
 
   // 1. Bildirim İzni İste
-  await messaging.requestPermission(
-    alert: true,
-    badge: true,
-    sound: true,
-  );
+  await messaging.requestPermission(alert: true, badge: true, sound: true);
 
   // 2. 'all' kanalına abone ol (Hocanın attığı bildirimler için)
   await messaging.subscribeToTopic("all");
@@ -63,12 +59,17 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      initialRoute: '/login',
+      initialRoute: '/',
       routes: {
+        '/': (context) => const SplashPage(),
         '/login': (context) => const LoginPage(),
         '/ogrenci-anasayfa': (context) => const StudentHomePage(),
         '/ogretmen-anasayfa': (context) => const TeacherHomePage(),
         '/ogretmen-ders-detay': (context) => const CourseStudentsPage(),
+        '/ogretmen-analiz': (context) {
+          final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>;
+          return TeacherAnalyticsPage(course: args);
+        },
         '/admin-panel': (context) => const AdminPage(),
       },
     );

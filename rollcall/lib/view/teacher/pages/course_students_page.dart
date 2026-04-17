@@ -11,9 +11,17 @@ final DateTime TERM_START = DateTime(2026, 2, 9);
 final DateTime TERM_END = DateTime(2026, 6, 12);
 
 int getScheduledDaysCount(DateTime start, DateTime end, String courseDayRaw) {
-  final List<String> scheduledDays = courseDayRaw.toLowerCase().split(',').map((e) => e.trim()).toList();
+  final List<String> scheduledDays = courseDayRaw
+      .toLowerCase()
+      .split(',')
+      .map((e) => e.trim())
+      .toList();
   int count = 0;
-  for (DateTime d = start; d.isBefore(end) || DateUtils.isSameDay(d, end); d = d.add(const Duration(days: 1))) {
+  for (
+    DateTime d = start;
+    d.isBefore(end) || DateUtils.isSameDay(d, end);
+    d = d.add(const Duration(days: 1))
+  ) {
     final dayEnglish = DateFormat('EEEE').format(d).toLowerCase();
     if (scheduledDays.contains(dayEnglish)) {
       count++;
@@ -54,14 +62,23 @@ String _getDayInEnglish(DateTime date) {
   return DateFormat('EEEE').format(date);
 }
 
-String _formatTimeRange(String? startTime) {
+String _formatTimeRange(String? startTime, String? endTime) {
   if (startTime == null || startTime.isEmpty) return '';
   try {
-    final parts = startTime.split(':');
-    final hour = int.parse(parts[0]);
-    final minute = parts[1];
-    final endHour = (hour + 3) % 24;
-    return '${hour.toString().padLeft(2, '0')}:$minute - ${endHour.toString().padLeft(2, '0')}:$minute';
+    final startParts = startTime.split(':');
+    final startH = int.parse(startParts[0]);
+    final startM = startParts[1];
+    
+    String endDisplay;
+    if (endTime != null && endTime.isNotEmpty) {
+      final endParts = endTime.split(':');
+      endDisplay = '${endParts[0]}:${endParts[1]}';
+    } else {
+      final endHour = (startH + 3) % 24;
+      endDisplay = '${endHour.toString().padLeft(2, '0')}:$startM';
+    }
+    
+    return '${startH.toString().padLeft(2, '0')}:$startM - $endDisplay';
   } catch (e) {
     return startTime;
   }
@@ -80,8 +97,8 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
   Map<String, dynamic>? _course;
   List<Map<String, dynamic>> _students = [];
   Map<String, bool> _attendanceMap = {};
-  DateTime _selectedDate = DateTime.now().isBefore(TERM_START) 
-      ? TERM_START 
+  DateTime _selectedDate = DateTime.now().isBefore(TERM_START)
+      ? TERM_START
       : (DateTime.now().isAfter(TERM_END) ? TERM_END : DateTime.now());
 
   @override
@@ -151,7 +168,10 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Hata oluştu: $e'), backgroundColor: AppColors.error),
+        SnackBar(
+          content: Text('Hata oluştu: $e'),
+          backgroundColor: AppColors.error,
+        ),
       );
       setState(() {
         _attendanceMap[studentId] = currentVal ?? false;
@@ -162,9 +182,47 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
   bool _isScheduledDay(DateTime date) {
     if (_course == null) return true;
     final courseDayRaw = _course?['course_day'] ?? '';
-    final List<String> scheduledDays = courseDayRaw.toString().split(',').map((e) => e.trim().toLowerCase()).toList();
+    final List<String> scheduledDays = courseDayRaw
+        .toString()
+        .split(',')
+        .map((e) => e.trim().toLowerCase())
+        .toList();
     final dayEnglish = _getDayInEnglish(date).toLowerCase();
     return scheduledDays.contains(dayEnglish);
+  }
+
+  bool _canOpenQR() {
+    if (_course == null) return false;
+    // Bugünün tarihi seçili olmalı
+    if (!DateUtils.isSameDay(_selectedDate, DateTime.now())) return false;
+    // Ders günü olmalı
+    if (!_isScheduledDay(DateTime.now())) return false;
+
+    try {
+      final String startTimeStr = _course!['course_time'] ?? '00:00:00';
+      final String endTimeStr = _course!['course_end_time'] ?? '00:00:00';
+      
+      final startParts = startTimeStr.split(':');
+      final endParts = endTimeStr.split(':');
+      
+      final int startH = int.parse(startParts[0]);
+      final int startM = int.parse(startParts[1]);
+      final int endH = int.parse(endParts[0]);
+      final int endM = int.parse(endParts[1]);
+
+      final now = DateTime.now();
+      final nowTotal = now.hour * 60 + now.minute;
+      final startTotal = startH * 60 + startM;
+      // Eğer bitiş saati 00:00 ise ve başlangıçtan önce görünüyorsa 3 saat ekle (fallback)
+      int endTotal = endH * 60 + endM;
+      if (endTotal <= startTotal) {
+        endTotal = startTotal + 180; // 3 saat
+      }
+
+      return nowTotal >= startTotal && nowTotal <= endTotal;
+    } catch (e) {
+      return false;
+    }
   }
 
   Future<void> _selectDate() async {
@@ -175,7 +233,7 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
         isScheduledDay: _isScheduledDay,
       ),
     );
-    
+
     if (picked != null && picked != _selectedDate) {
       setState(() => _selectedDate = picked);
       _loadData();
@@ -184,9 +242,9 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
 
   void _showQRCode() {
     if (_course == null) return;
-    
+
     final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
-    
+
     showDialog(
       context: context,
       builder: (context) => _QRDisplayDialog(
@@ -199,9 +257,12 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final courseName = _course != null ? _course!['course_name'] : 'Ders Detayı';
+    final courseName = _course != null
+        ? _course!['course_name']
+        : 'Ders Detayı';
     final courseDayRaw = _course?['course_day'] ?? '';
     final courseTimeRaw = _course?['course_time'] ?? '';
+    final courseEndTimeRaw = _course?['course_end_time'] ?? '';
     final dateDisplay = DateFormat('dd MMMM yyyy').format(_selectedDate);
     final selectedDayEnglish = _getDayInEnglish(_selectedDate);
     final isCorrectDay = _isScheduledDay(_selectedDate);
@@ -213,17 +274,33 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
         elevation: 0,
         centerTitle: true,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 20),
+          icon: const Icon(
+            Icons.arrow_back_ios_new_rounded,
+            color: Colors.white,
+            size: 20,
+          ),
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
           _translateCourseName(courseName),
-          style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 17,
+            fontWeight: FontWeight.bold,
+          ),
         ),
         actions: [
           IconButton(
+            icon: const Icon(Icons.analytics_outlined, color: Colors.white),
+            onPressed: () {
+              if (_course != null) {
+                Navigator.pushNamed(context, '/ogretmen-analiz', arguments: _course);
+              }
+            },
+          ),
+          IconButton(
             icon: const Icon(Icons.qr_code_2_rounded, color: Colors.white),
-            onPressed: isCorrectDay ? _showQRCode : null,
+            onPressed: _canOpenQR() ? _showQRCode : null,
           ),
           const SizedBox(width: 8),
         ],
@@ -240,7 +317,11 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                 bottomRight: Radius.circular(30),
               ),
               boxShadow: [
-                BoxShadow(color: AppColors.primary.withValues(alpha: 0.15), blurRadius: 10, offset: const Offset(0, 5)),
+                BoxShadow(
+                  color: AppColors.primary.withValues(alpha: 0.15),
+                  blurRadius: 10,
+                  offset: const Offset(0, 5),
+                ),
               ],
             ),
             child: Column(
@@ -257,17 +338,43 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('Program Günü', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                          const Text(
+                            'Program Günü',
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 12,
+                            ),
+                          ),
                           const SizedBox(height: 2),
-                          Text(_translateDay(courseDayRaw), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                          Text(
+                            _translateDay(courseDayRaw),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                          ),
                         ],
                       ),
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
-                          const Text('Saat Aralığı', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                          const Text(
+                            'Saat Aralığı',
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 12,
+                            ),
+                          ),
                           const SizedBox(height: 2),
-                          Text(_formatTimeRange(courseTimeRaw), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                          Text(
+                            _formatTimeRange(courseTimeRaw, courseEndTimeRaw),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                          ),
                         ],
                       ),
                     ],
@@ -277,23 +384,43 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                 InkWell(
                   onTap: _selectDate,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 14,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(14),
-                      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10)],
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.05),
+                          blurRadius: 10,
+                        ),
+                      ],
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.calendar_month_rounded, color: AppColors.primary, size: 20),
+                        const Icon(
+                          Icons.calendar_month_rounded,
+                          color: AppColors.primary,
+                          size: 20,
+                        ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
                             '$dateDisplay (${_translateDay(selectedDayEnglish)})',
-                            style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w700, fontSize: 14),
+                            style: const TextStyle(
+                              color: AppColors.textPrimary,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 14,
+                            ),
                           ),
                         ),
-                        const Icon(Icons.arrow_drop_down_circle_outlined, color: AppColors.primary, size: 20),
+                        const Icon(
+                          Icons.arrow_drop_down_circle_outlined,
+                          color: AppColors.primary,
+                          size: 20,
+                        ),
                       ],
                     ),
                   ),
@@ -303,41 +430,78 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
           ),
 
           Expanded(
-            child: !isCorrectDay 
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.event_busy_rounded, color: AppColors.primary.withValues(alpha: 0.2), size: 80),
-                      const SizedBox(height: 16),
-                      const Text('Ders Programı Dışı', style: TextStyle(color: AppColors.textPrimary, fontSize: 18, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 8),
-                      const Text('Lütfen takvimden yeşil noktalı günleri seçin.', style: TextStyle(color: AppColors.textSecondary)),
-                    ],
-                  ),
-                )
-              : _isLoading
-                ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+            child: !isCorrectDay
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.event_busy_rounded,
+                          color: AppColors.primary.withValues(alpha: 0.2),
+                          size: 80,
+                        ),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'Ders Programı Dışı',
+                          style: TextStyle(
+                            color: AppColors.textPrimary,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Lütfen takvimden yeşil noktalı günleri seçin.',
+                          style: TextStyle(color: AppColors.textSecondary),
+                        ),
+                      ],
+                    ),
+                  )
+                : _isLoading
+                ? const Center(
+                    child: CircularProgressIndicator(color: AppColors.primary),
+                  )
                 : Column(
                     children: [
                       Padding(
                         padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
                         child: Row(
                           children: [
-                            const Icon(Icons.people_alt_rounded, color: AppColors.primary, size: 16),
+                            const Icon(
+                              Icons.people_alt_rounded,
+                              color: AppColors.primary,
+                              size: 16,
+                            ),
                             const SizedBox(width: 8),
-                            Text('${_students.length} Öğrenci Kayıtlı', style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
+                            Text(
+                              '${_students.length} Öğrenci Kayıtlı',
+                              style: const TextStyle(
+                                color: AppColors.textPrimary,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                             const Spacer(),
-                            const Text('Sıralama: Okul No', style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
+                            const Text(
+                              'Sıralama: Okul No',
+                              style: TextStyle(
+                                color: AppColors.textSecondary,
+                                fontSize: 11,
+                              ),
+                            ),
                           ],
                         ),
                       ),
                       Expanded(
                         child: ListView.builder(
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 20,
+                            vertical: 10,
+                          ),
                           itemCount: _students.length,
                           itemBuilder: (context, index) {
-                            final student = _students[index]['users'] as Map<String, dynamic>;
+                            final student =
+                                _students[index]['users']
+                                    as Map<String, dynamic>;
                             final sid = student['id'];
                             final isPresent = _attendanceMap[sid] ?? false;
 
@@ -349,7 +513,13 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                                 borderRadius: BorderRadius.circular(16),
                                 border: Border.all(color: AppColors.border),
                                 boxShadow: [
-                                  BoxShadow(color: AppColors.primary.withValues(alpha: 0.03), blurRadius: 8, offset: const Offset(0, 4)),
+                                  BoxShadow(
+                                    color: AppColors.primary.withValues(
+                                      alpha: 0.03,
+                                    ),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 4),
+                                  ),
                                 ],
                               ),
                               child: Row(
@@ -357,28 +527,62 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                                   CircleAvatar(
                                     radius: 20,
                                     backgroundColor: AppColors.primaryLight,
-                                    child: Text(student['first_name'][0].toUpperCase(), style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold)),
+                                    child: Text(
+                                      student['first_name'][0].toUpperCase(),
+                                      style: const TextStyle(
+                                        color: AppColors.primary,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
                                   ),
                                   const SizedBox(width: 14),
                                   Expanded(
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
-                                        Text('${student['first_name']} ${student['last_name']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                                        Text(student['school_no'] ?? '', style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                                        Text(
+                                          '${student['first_name']} ${student['last_name']}',
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 15,
+                                          ),
+                                        ),
+                                        Text(
+                                          student['school_no'] ?? '',
+                                          style: const TextStyle(
+                                            color: AppColors.textSecondary,
+                                            fontSize: 12,
+                                          ),
+                                        ),
                                       ],
                                     ),
                                   ),
                                   InkWell(
-                                    onTap: () => _toggleAttendance(sid, isPresent),
+                                    onTap: () =>
+                                        _toggleAttendance(sid, isPresent),
                                     child: AnimatedContainer(
-                                      duration: const Duration(milliseconds: 300),
-                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                      duration: const Duration(
+                                        milliseconds: 300,
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 16,
+                                        vertical: 8,
+                                      ),
                                       decoration: BoxDecoration(
-                                        color: isPresent ? AppColors.success : AppColors.error,
+                                        color: isPresent
+                                            ? AppColors.success
+                                            : AppColors.error,
                                         borderRadius: BorderRadius.circular(10),
                                       ),
-                                      child: Text(isPresent ? 'Var' : 'Yok', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                                      child: Text(
+                                        isPresent ? 'Var' : 'Yok',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 12,
+                                        ),
+                                      ),
                                     ),
                                   ),
                                 ],
@@ -392,12 +596,18 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
           ),
         ],
       ),
-      floatingActionButton: isCorrectDay
+      floatingActionButton: _canOpenQR()
           ? FloatingActionButton.extended(
               onPressed: _showQRCode,
               backgroundColor: AppColors.primary,
               icon: const Icon(Icons.qr_code_2_rounded, color: Colors.white),
-              label: const Text('QR Oluştur', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              label: const Text(
+                'QR Oluştur',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             )
           : null,
     );
@@ -513,11 +723,18 @@ class _QRDisplayDialogState extends State<_QRDisplayDialog> {
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.timer_outlined, size: 14, color: AppColors.textSecondary),
+                const Icon(
+                  Icons.timer_outlined,
+                  size: 14,
+                  color: AppColors.textSecondary,
+                ),
                 const SizedBox(width: 4),
                 Text(
                   'QR kod $_secondsLeft saniye sonra yenilenecek',
-                  style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textSecondary,
+                  ),
                 ),
               ],
             ),
@@ -541,7 +758,10 @@ class _QRDisplayDialogState extends State<_QRDisplayDialog> {
                 ),
                 child: const Text(
                   'Kapat',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
             ),
@@ -555,7 +775,10 @@ class _QRDisplayDialogState extends State<_QRDisplayDialog> {
 class _CustomCalendarDialog extends StatefulWidget {
   final DateTime initialDate;
   final bool Function(DateTime) isScheduledDay;
-  const _CustomCalendarDialog({required this.initialDate, required this.isScheduledDay});
+  const _CustomCalendarDialog({
+    required this.initialDate,
+    required this.isScheduledDay,
+  });
 
   @override
   State<_CustomCalendarDialog> createState() => _CustomCalendarDialogState();
@@ -568,14 +791,21 @@ class _CustomCalendarDialogState extends State<_CustomCalendarDialog> {
   @override
   void initState() {
     super.initState();
-    _displayedMonth = DateTime(widget.initialDate.year, widget.initialDate.month);
+    _displayedMonth = DateTime(
+      widget.initialDate.year,
+      widget.initialDate.month,
+    );
     _selectedDate = widget.initialDate;
   }
 
   @override
   Widget build(BuildContext context) {
-    final daysCount = DateUtils.getDaysInMonth(_displayedMonth.year, _displayedMonth.month);
-    final firstDay = DateTime(_displayedMonth.year, _displayedMonth.month, 1).weekday - 1;
+    final daysCount = DateUtils.getDaysInMonth(
+      _displayedMonth.year,
+      _displayedMonth.month,
+    );
+    final firstDay =
+        DateTime(_displayedMonth.year, _displayedMonth.month, 1).weekday - 1;
 
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
@@ -588,42 +818,123 @@ class _CustomCalendarDialogState extends State<_CustomCalendarDialog> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                IconButton(icon: const Icon(Icons.chevron_left, color: AppColors.primary), onPressed: () => setState(() => _displayedMonth = DateTime(_displayedMonth.year, _displayedMonth.month - 1))),
-                Text(DateFormat('MMMM yyyy').format(_displayedMonth), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                IconButton(icon: const Icon(Icons.chevron_right, color: AppColors.primary), onPressed: () => setState(() => _displayedMonth = DateTime(_displayedMonth.year, _displayedMonth.month + 1))),
+                IconButton(
+                  icon: const Icon(
+                    Icons.chevron_left,
+                    color: AppColors.primary,
+                  ),
+                  onPressed: () => setState(
+                    () => _displayedMonth = DateTime(
+                      _displayedMonth.year,
+                      _displayedMonth.month - 1,
+                    ),
+                  ),
+                ),
+                Text(
+                  DateFormat('MMMM yyyy').format(_displayedMonth),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(
+                    Icons.chevron_right,
+                    color: AppColors.primary,
+                  ),
+                  onPressed: () => setState(
+                    () => _displayedMonth = DateTime(
+                      _displayedMonth.year,
+                      _displayedMonth.month + 1,
+                    ),
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 10),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: ['P', 'S', 'Ç', 'P', 'C', 'C', 'P'].map((d) => Text(d, style: const TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold))).toList(),
+              children: ['P', 'S', 'Ç', 'P', 'C', 'C', 'P']
+                  .map(
+                    (d) => Text(
+                      d,
+                      style: const TextStyle(
+                        color: Colors.grey,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  )
+                  .toList(),
             ),
             const SizedBox(height: 10),
             GridView.builder(
               shrinkWrap: true,
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 7),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 7,
+              ),
               itemCount: 42,
               itemBuilder: (context, index) {
                 final day = index - firstDay + 1;
                 if (day < 1 || day > daysCount) return const SizedBox();
-                final date = DateTime(_displayedMonth.year, _displayedMonth.month, day);
-                final bool inTerm = (date.isAfter(TERM_START) || DateUtils.isSameDay(date, TERM_START)) && (date.isBefore(TERM_END) || DateUtils.isSameDay(date, TERM_END));
+                final date = DateTime(
+                  _displayedMonth.year,
+                  _displayedMonth.month,
+                  day,
+                );
+                final bool inTerm =
+                    (date.isAfter(TERM_START) ||
+                        DateUtils.isSameDay(date, TERM_START)) &&
+                    (date.isBefore(TERM_END) ||
+                        DateUtils.isSameDay(date, TERM_END));
                 final bool isSched = inTerm && widget.isScheduledDay(date);
-                final bool isSelected = DateUtils.isSameDay(date, _selectedDate);
+                final bool isSelected = DateUtils.isSameDay(
+                  date,
+                  _selectedDate,
+                );
 
                 return InkWell(
-                  onTap: isSched ? () => setState(() => _selectedDate = date) : null,
+                  onTap: isSched
+                      ? () => setState(() => _selectedDate = date)
+                      : null,
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Container(
-                        width: 32, height: 32,
-                        decoration: BoxDecoration(color: isSelected ? AppColors.primary : Colors.transparent, shape: BoxShape.circle),
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? AppColors.primary
+                              : Colors.transparent,
+                          shape: BoxShape.circle,
+                        ),
                         child: Center(
-                          child: Text(day.toString(), style: TextStyle(color: isSelected ? Colors.white : (isSched ? AppColors.textPrimary : Colors.grey[300]), fontWeight: isSched || isSelected ? FontWeight.bold : FontWeight.normal)),
+                          child: Text(
+                            day.toString(),
+                            style: TextStyle(
+                              color: isSelected
+                                  ? Colors.white
+                                  : (isSched
+                                        ? AppColors.textPrimary
+                                        : Colors.grey[300]),
+                              fontWeight: isSched || isSelected
+                                  ? FontWeight.bold
+                                  : FontWeight.normal,
+                            ),
+                          ),
                         ),
                       ),
-                      if (isSched) Container(margin: const EdgeInsets.only(top: 2), width: 4, height: 4, decoration: const BoxDecoration(color: AppColors.success, shape: BoxShape.circle)),
+                      if (isSched)
+                        Container(
+                          margin: const EdgeInsets.only(top: 2),
+                          width: 4,
+                          height: 4,
+                          decoration: const BoxDecoration(
+                            color: AppColors.success,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
                     ],
                   ),
                 );
@@ -633,18 +944,62 @@ class _CustomCalendarDialogState extends State<_CustomCalendarDialog> {
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                TextButton(onPressed: () => Navigator.pop(context), child: const Text('İptal', style: TextStyle(color: Colors.grey))),
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text(
+                    'İptal',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                ),
                 const SizedBox(width: 12),
                 ElevatedButton(
                   onPressed: () => Navigator.pop(context, _selectedDate),
-                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                  child: const Text('Seç', style: TextStyle(color: Colors.white)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  child: const Text(
+                    'Seç',
+                    style: TextStyle(color: Colors.white),
+                  ),
                 ),
               ],
-            )
+            ),
           ],
         ),
       ),
+    );
+  }
+}
+
+// ── Stat Item Widget ───────────────────────────────────────
+class _StatItem extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _StatItem({required this.label, required this.value, Key? key})
+    : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Text(
+          value,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: const TextStyle(color: Colors.white70, fontSize: 12),
+        ),
+      ],
     );
   }
 }

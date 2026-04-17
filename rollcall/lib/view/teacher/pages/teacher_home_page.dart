@@ -73,7 +73,7 @@ class _TeacherHomePageState extends State<TeacherHomePage> {
 
     final courses = await _supabase
         .from('courses')
-        .select('id, course_name, course_code, course_day, course_time')
+        .select('id, course_name, course_code, course_day, course_time, course_end_time')
         .eq('teacher_id', uid)
         .order('course_code');
 

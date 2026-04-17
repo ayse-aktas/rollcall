@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../../core/utils/theme/colors/app_colors.dart';
 
 enum LoginType { student, teacher }
 
