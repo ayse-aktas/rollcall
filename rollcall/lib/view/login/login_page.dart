@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../core/utils/security_utils.dart';
 
 enum LoginType { student, teacher }
 
@@ -74,16 +75,38 @@ class _LoginPageState extends State<LoginPage>
         return;
       }
 
-      // Fetch role from profile
-      final user = await Supabase.instance.client
+      // Fetch profile and check device binding
+      final currentDeviceId = await SecurityUtils.getUniqueDeviceId();
+      final profile = await Supabase.instance.client
           .from('users')
-          .select('role')
+          .select('role, device_id')
           .eq('id', response.user!.id)
           .single();
 
+      final role = profile['role'] as String;
+      final registeredDeviceId = profile['device_id'] as String?;
+
+      if (role == 'student') {
+        if (registeredDeviceId == null || registeredDeviceId.isEmpty) {
+          // First time login - Bind the device
+          await Supabase.instance.client
+              .from('users')
+              .update({'device_id': currentDeviceId})
+              .eq('id', response.user!.id);
+        } else if (registeredDeviceId != currentDeviceId) {
+          // Device mismatch - Security Breach
+          await Supabase.instance.client.auth.signOut();
+          if (!mounted) return;
+          setState(() {
+            _errorMessage = 'Bu hesap başka bir cihaza kayıtlıdır.\nLütfen kendi cihazınızdan giriş yapın.';
+            _isLoading = false;
+          });
+          return;
+        }
+      }
+
       if (!mounted) return;
 
-      final role = user['role'] as String;
       if (role == 'student') {
         Navigator.pushReplacementNamed(context, '/ogrenci-anasayfa');
       } else if (role == 'teacher') {
@@ -94,7 +117,8 @@ class _LoginPageState extends State<LoginPage>
     } on AuthException catch (e) {
       setState(() => _errorMessage = _translateAuthError(e.message));
     } catch (e) {
-      setState(() => _errorMessage = 'Beklenmeyen bir hata oluştu.');
+      debugPrint('Login Error: $e');
+      setState(() => _errorMessage = 'Giriş işlemi sırasında bir hata oluştu.');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }

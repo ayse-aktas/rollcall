@@ -48,6 +48,12 @@ dependencies:
   excel: ^4.0.6
   path_provider: ^2.1.5
   share_plus: ^12.0.2
+  beacon_broadcast: ^0.3.1
+  flutter_beacon: ^0.5.1
+  permission_handler: ^12.0.1
+  device_info_plus: ^12.4.0
+  crypto: ^3.0.7
+  geolocator: ^13.0.1
 
 dev_dependencies:
   flutter_test:

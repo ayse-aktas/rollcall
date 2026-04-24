@@ -5,6 +5,9 @@ import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'dart:convert';
 import 'dart:async';
+import 'package:beacon_broadcast/beacon_broadcast.dart';
+import 'package:permission_handler/permission_handler.dart';
+import '../../../core/utils/security_utils.dart';
 
 // ACADEMIC TERM DATES
 final DateTime TERM_START = DateTime(2026, 2, 9);
@@ -101,6 +104,13 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
       ? TERM_START
       : (DateTime.now().isAfter(TERM_END) ? TERM_END : DateTime.now());
 
+  StreamSubscription? _attendanceSubscription;
+  RealtimeChannel? _realtimeChannel;
+  bool _isRealtimeEnabled = false;
+  bool _isAutomationRunning = false;
+  int _automationTimer = 0;
+  Timer? _automationCountdownTimer;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -125,6 +135,15 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
         .eq('course_id', courseId);
 
     final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
+
+    final courseDetails = await _supabase
+        .from('courses')
+        .select(
+          '*, classrooms(id, name, faculty_id, beacon_major, beacon_secret, faculties(name))',
+        )
+        .eq('id', courseId)
+        .single();
+
     final attendanceRecords = await _supabase
         .from('attendance')
         .select('student_id, is_present')
@@ -138,6 +157,7 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
 
     if (!mounted) return;
     setState(() {
+      _course = courseDetails;
       _students = List<Map<String, dynamic>>.from(studentCourses);
       _students.sort((a, b) {
         final noA = (a['users']?['school_no'] ?? '').toString();
@@ -147,8 +167,178 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
       _attendanceMap = attendanceMap;
       _isLoading = false;
     });
+
+    if (_isRealtimeEnabled) {
+      _initRealtime();
+    }
+    _setupRealtimeChannel();
   }
 
+  void _setupRealtimeChannel() {
+    if (_course == null) return;
+    final courseId = _course!['id'];
+    _realtimeChannel = _supabase.channel(
+      'course_$courseId',
+      opts: const RealtimeChannelConfig(self: true),
+    );
+    _realtimeChannel!.subscribe();
+  }
+
+  void _initRealtime() {
+    _attendanceSubscription?.cancel();
+
+    final courseId = _course!['id'];
+    final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
+
+    _attendanceSubscription = _supabase
+        .from('attendance')
+        .stream(primaryKey: ['student_id', 'course_id', 'date'])
+        .listen((List<Map<String, dynamic>> data) {
+          final Map<String, bool> newMap = {};
+
+          final filteredData = data.where(
+            (r) => r['course_id'] == courseId && r['date'] == dateStr,
+          );
+
+          for (var record in filteredData) {
+            newMap[record['student_id']] = record['is_present'] ?? false;
+          }
+          if (mounted) {
+            setState(() {
+              _attendanceMap = newMap;
+            });
+          }
+        });
+  }
+
+  void _startAutomaticAttendance() async {
+    if (_isAutomationRunning) return;
+
+    setState(() {
+      _isAutomationRunning = true;
+      _automationTimer = 60;
+    });
+
+    // 1. Update Classroom to signal Hardware (ESP32)
+    try {
+      // Find Classroom ID from course data
+      final classroomId = _course?['classroom_id'] ?? _course?['classrooms']?['id'];
+      
+      print('--- AUTOMATION DEBUG START ---');
+      print('Target Classroom ID: $classroomId');
+      print('Course Data Keys: ${_course?.keys.toList()}');
+      if (_course?['classrooms'] != null) {
+        print('Classroom Data Keys: ${(_course?['classrooms'] as Map).keys.toList()}');
+      }
+
+      if (classroomId != null) {
+        final response = await _supabase
+            .from('classrooms')
+            .update({
+              'is_automation_on': true,
+              'active_course_id': _course!['id'], // Donanımın hangi ders olduğunu bilmesi için
+            })
+            .eq('id', classroomId.toString().trim())
+            .select();
+            
+        print('Supabase Update Response: $response');
+        
+        if (response.isEmpty) {
+          print('WARNING: Update successful but no rows were affected.');
+          print('!!! DİKKAT: Bu durum genelde Supabase RLS Policy (Update izni olmaması) kaynaklıdır.');
+        } else {
+          print('SUCCESS: Classroom automation flag set to TRUE with active_course_id');
+        }
+      } else {
+        print('ERROR: Classroom ID is NULL. Cannot update database.');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Hata: Sınıf bilgisi bulunamadı!'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+      }
+      print('--- AUTOMATION DEBUG END ---');
+    } catch (e) {
+      print('CRITICAL UPDATE ERROR: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Veritabanı hatası: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      _isAutomationRunning = false;
+      return;
+    }
+
+    // 2. Send Realtime Broadcast to Students
+    await _realtimeChannel?.sendBroadcastMessage(
+      event: 'start_automation',
+      payload: {
+        'course_id': _course!['id'],
+        'major': _course!['classrooms']?['beacon_major'] ?? 101,
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      },
+    );
+
+    _automationCountdownTimer = Timer.periodic(const Duration(seconds: 1), (
+      timer,
+    ) async {
+      if (_automationTimer > 0) {
+        setState(() => _automationTimer--);
+      } else {
+        await _stopAutomaticAttendance();
+      }
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Otomatik yoklama başlatıldı! Öğrenciler taranıyor...'),
+        backgroundColor: AppColors.primary,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  Future<void> _stopAutomaticAttendance() async {
+    _automationCountdownTimer?.cancel();
+
+    // Reset database flag for hardware (Classroom only)
+    final classroomId =
+        _course?['classroom_id'] ?? _course?['classrooms']?['id'];
+
+    if (classroomId != null) {
+      await _supabase
+          .from('classrooms')
+          .update({
+            'is_automation_on': false,
+            'active_course_id': null
+          })
+          .eq('id', classroomId);
+    }
+
+    setState(() {
+      _isAutomationRunning = false;
+      _automationTimer = 0;
+    });
+  }
+
+  void _toggleRealtime() {
+    setState(() {
+      _isRealtimeEnabled = !_isRealtimeEnabled;
+      if (_isRealtimeEnabled) {
+        _initRealtime();
+      } else {
+        _attendanceSubscription?.cancel();
+      }
+    });
+  }
+
+  // ... (rest of the class remains same)
   Future<void> _toggleAttendance(String studentId, bool? currentVal) async {
     final newVal = !(currentVal ?? false);
     final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
@@ -193,9 +383,7 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
 
   bool _canOpenQR() {
     if (_course == null) return false;
-    // Bugünün tarihi seçili olmalı
     if (!DateUtils.isSameDay(_selectedDate, DateTime.now())) return false;
-    // Ders günü olmalı
     if (!_isScheduledDay(DateTime.now())) return false;
 
     try {
@@ -213,10 +401,9 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
       final now = DateTime.now();
       final nowTotal = now.hour * 60 + now.minute;
       final startTotal = startH * 60 + startM;
-      // Eğer bitiş saati 00:00 ise ve başlangıçtan önce görünüyorsa 3 saat ekle (fallback)
       int endTotal = endH * 60 + endM;
       if (endTotal <= startTotal) {
-        endTotal = startTotal + 180; // 3 saat
+        endTotal = startTotal + 180;
       }
 
       return nowTotal >= startTotal && nowTotal <= endTotal;
@@ -242,9 +429,7 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
 
   void _showQRCode() {
     if (_course == null) return;
-
     final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
-
     showDialog(
       context: context,
       builder: (context) => _QRDisplayDialog(
@@ -260,7 +445,6 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
     final courseName = _course != null
         ? _course!['course_name']
         : 'Ders Detayı';
-    final courseDayRaw = _course?['course_day'] ?? '';
     final courseTimeRaw = _course?['course_time'] ?? '';
     final courseEndTimeRaw = _course?['course_end_time'] ?? '';
     final dateDisplay = DateFormat('dd MMMM yyyy').format(_selectedDate);
@@ -311,7 +495,6 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
       ),
       body: Column(
         children: [
-          // Header Accent (Like Student Page)
           Container(
             padding: const EdgeInsets.fromLTRB(20, 10, 20, 24),
             decoration: BoxDecoration(
@@ -336,47 +519,83 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                     color: Colors.white.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(16),
                   ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  child: Column(
                     children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text(
-                            'Program Günü',
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Program Günü',
+                                  style: TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  _translateCourseName(
+                                        _course?['course_name'],
+                                      ) +
+                                      (_course?['classrooms'] != null
+                                          ? ' - ${_course?['classrooms']['name']}'
+                                          : ''),
+                                  style: const TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                  ),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  _translateDay(_course?['course_day']),
+                                  style: const TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                          const SizedBox(height: 2),
-                          Text(
-                            _translateDay(courseDayRaw),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                            ),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              const Text(
+                                'Saat Aralığı',
+                                style: TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                _formatTimeRange(
+                                  courseTimeRaw,
+                                  courseEndTimeRaw,
+                                ),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
+                      const SizedBox(height: 16),
+                      Row(
                         children: [
-                          const Text(
-                            'Saat Aralığı',
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            _formatTimeRange(courseTimeRaw, courseEndTimeRaw),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
+                          Expanded(
+                            child: _AutomationButton(
+                              isActive: _isAutomationRunning,
+                              timer: _automationTimer,
+                              onTap: _startAutomaticAttendance,
                             ),
                           ),
                         ],
@@ -395,12 +614,6 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(14),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.05),
-                          blurRadius: 10,
-                        ),
-                      ],
                     ),
                     child: Row(
                       children: [
@@ -432,34 +645,12 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
               ],
             ),
           ),
-
           Expanded(
             child: !isCorrectDay
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.event_busy_rounded,
-                          color: AppColors.primary.withValues(alpha: 0.2),
-                          size: 80,
-                        ),
-                        const SizedBox(height: 16),
-                        const Text(
-                          'Ders Programı Dışı',
-                          style: TextStyle(
-                            color: AppColors.textPrimary,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        const Text(
-                          'Lütfen takvimden yeşil noktalı günleri seçin.',
-                          style: TextStyle(color: AppColors.textSecondary),
-                        ),
-                      ],
-                    ),
+                ? _buildEmptyState(
+                    'Ders Programı Dışı',
+                    'Lütfen takvimden yeşil noktalı günleri seçin.',
+                    Icons.event_busy_rounded,
                   )
                 : _isLoading
                 ? const Center(
@@ -467,34 +658,7 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                   )
                 : Column(
                     children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
-                        child: Row(
-                          children: [
-                            const Icon(
-                              Icons.people_alt_rounded,
-                              color: AppColors.primary,
-                              size: 16,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              '${_students.length} Öğrenci Kayıtlı',
-                              style: const TextStyle(
-                                color: AppColors.textPrimary,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const Spacer(),
-                            const Text(
-                              'Sıralama: Okul No',
-                              style: TextStyle(
-                                color: AppColors.textSecondary,
-                                fontSize: 11,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                      _buildHeaderStats(),
                       Expanded(
                         child: ListView.builder(
                           padding: const EdgeInsets.symmetric(
@@ -508,89 +672,10 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                                     as Map<String, dynamic>;
                             final sid = student['id'];
                             final isPresent = _attendanceMap[sid] ?? false;
-
-                            return Container(
-                              margin: const EdgeInsets.only(bottom: 12),
-                              padding: const EdgeInsets.all(16),
-                              decoration: BoxDecoration(
-                                color: AppColors.surface,
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(color: AppColors.border),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: AppColors.primary.withValues(
-                                      alpha: 0.03,
-                                    ),
-                                    blurRadius: 8,
-                                    offset: const Offset(0, 4),
-                                  ),
-                                ],
-                              ),
-                              child: Row(
-                                children: [
-                                  CircleAvatar(
-                                    radius: 20,
-                                    backgroundColor: AppColors.primaryLight,
-                                    child: Text(
-                                      student['first_name'][0].toUpperCase(),
-                                      style: const TextStyle(
-                                        color: AppColors.primary,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 14),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          '${student['first_name']} ${student['last_name']}',
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 15,
-                                          ),
-                                        ),
-                                        Text(
-                                          student['school_no'] ?? '',
-                                          style: const TextStyle(
-                                            color: AppColors.textSecondary,
-                                            fontSize: 12,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  InkWell(
-                                    onTap: () =>
-                                        _toggleAttendance(sid, isPresent),
-                                    child: AnimatedContainer(
-                                      duration: const Duration(
-                                        milliseconds: 300,
-                                      ),
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 16,
-                                        vertical: 8,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: isPresent
-                                            ? AppColors.success
-                                            : AppColors.error,
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      child: Text(
-                                        isPresent ? 'Var' : 'Yok',
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
+                            return _StudentItem(
+                              student: student,
+                              isPresent: isPresent,
+                              onTap: () => _toggleAttendance(sid, isPresent),
                             );
                           },
                         ),
@@ -600,20 +685,233 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
           ),
         ],
       ),
-      floatingActionButton: _canOpenQR()
-          ? FloatingActionButton.extended(
-              onPressed: _showQRCode,
-              backgroundColor: AppColors.primary,
-              icon: const Icon(Icons.qr_code_2_rounded, color: Colors.white),
-              label: const Text(
-                'QR Oluştur',
-                style: TextStyle(
+      floatingActionButton: _canOpenQR() ? _buildFABs() : null,
+    );
+  }
+
+  Widget _buildEmptyState(String title, String subtitle, IconData icon) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, color: AppColors.primary.withValues(alpha: 0.2), size: 80),
+          const SizedBox(height: 16),
+          Text(
+            title,
+            style: const TextStyle(
+              color: AppColors.textPrimary,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            subtitle,
+            style: const TextStyle(color: AppColors.textSecondary),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeaderStats() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.people_alt_rounded,
+            color: AppColors.primary,
+            size: 16,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '${_attendanceMap.values.where((v) => v).length} / ${_students.length} Öğrenci Sınıfta',
+            style: const TextStyle(
+              color: AppColors.textPrimary,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          if (_isRealtimeEnabled) ...[
+            const SizedBox(width: 8),
+            const Icon(Icons.circle, color: AppColors.success, size: 8),
+            const SizedBox(width: 4),
+            const Text(
+              'CANLI',
+              style: TextStyle(
+                color: AppColors.success,
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+          const Spacer(),
+          const Text(
+            'Sıralama: Okul No',
+            style: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFABs() {
+    return FloatingActionButton.extended(
+      onPressed: _showQRCode,
+      backgroundColor: AppColors.primary,
+      heroTag: 'qr',
+      icon: const Icon(Icons.qr_code_2_rounded, color: Colors.white),
+      label: const Text(
+        'QR Oluştur',
+        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _attendanceSubscription?.cancel();
+    _automationCountdownTimer?.cancel();
+    if (_realtimeChannel != null) {
+      _supabase.removeChannel(_realtimeChannel!);
+    }
+    super.dispose();
+  }
+}
+
+class _StudentItem extends StatelessWidget {
+  final Map<String, dynamic> student;
+  final bool isPresent;
+  final VoidCallback onTap;
+  const _StudentItem({
+    required this.student,
+    required this.isPresent,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.primary.withValues(alpha: 0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 20,
+            backgroundColor: AppColors.primaryLight,
+            child: Text(
+              student['first_name'][0].toUpperCase(),
+              style: const TextStyle(
+                color: AppColors.primary,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${student['first_name']} ${student['last_name']}',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
+                ),
+                Text(
+                  student['school_no'] ?? '',
+                  style: const TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          InkWell(
+            onTap: onTap,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: isPresent ? AppColors.success : AppColors.error,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                isPresent ? 'Var' : 'Yok',
+                style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
+                  fontSize: 12,
                 ),
               ),
-            )
-          : null,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AutomationButton extends StatelessWidget {
+  final bool isActive;
+  final int timer;
+  final VoidCallback onTap;
+  const _AutomationButton({
+    required this.isActive,
+    required this.timer,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: isActive ? null : onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: isActive ? Colors.white : Colors.white.withValues(alpha: 0.2),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.3),
+            width: 1,
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              isActive ? Icons.bluetooth_searching_rounded : Icons.bolt_rounded,
+              color: isActive ? AppColors.primary : Colors.white,
+              size: 20,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              isActive
+                  ? 'Taranıyor... ($timer s)'
+                  : 'Otomatik Yoklamayı Başlat',
+              style: TextStyle(
+                color: isActive ? AppColors.primary : Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -622,13 +920,11 @@ class _QRDisplayDialog extends StatefulWidget {
   final String courseId;
   final String courseName;
   final String dateStr;
-
   const _QRDisplayDialog({
     required this.courseId,
     required this.courseName,
     required this.dateStr,
   });
-
   @override
   State<_QRDisplayDialog> createState() => _QRDisplayDialogState();
 }
@@ -637,39 +933,75 @@ class _QRDisplayDialogState extends State<_QRDisplayDialog> {
   late String _qrData;
   Timer? _timer;
   int _secondsLeft = 60;
+  final BeaconBroadcast _beaconBroadcast = BeaconBroadcast();
+  bool _isBeaconActive = false;
+  String _currentBeaconToken = '';
 
   @override
   void initState() {
     super.initState();
+    _checkPermissionsAndStart();
     _generateData();
     _startTimer();
   }
 
+  Future<void> _checkPermissionsAndStart() async {
+    final status = await [
+      Permission.bluetoothAdvertise,
+      Permission.bluetoothConnect,
+      Permission.location,
+    ].request();
+    if (status.values.every((s) => s.isGranted)) _startBeacon();
+  }
+
+  void _startBeacon() async {
+    try {
+      _currentBeaconToken = SecurityUtils.generateTimeToken(widget.courseId);
+      final int minor = int.tryParse(_currentBeaconToken) ?? 0;
+      await _beaconBroadcast
+          .setUUID('E2C56DB5-DFFB-48D2-B060-D0F5A71096E0')
+          .setMajorId(1)
+          .setMinorId(minor)
+          .setTransmissionPower(-59)
+          .setAdvertiseMode(AdvertiseMode.balanced)
+          .start();
+      setState(() => _isBeaconActive = true);
+    } catch (e) {
+      debugPrint('Beacon Error: $e');
+    }
+  }
+
+  void _stopBeacon() => _beaconBroadcast.stop();
+
   void _generateData() {
+    _currentBeaconToken = SecurityUtils.generateTimeToken(widget.courseId);
     setState(() {
       _qrData = jsonEncode({
         'type': 'attendance_qr',
         'course_id': widget.courseId,
         'date': widget.dateStr,
         'timestamp': DateTime.now().millisecondsSinceEpoch,
+        'beacon_token': _currentBeaconToken,
+        'secure': true,
       });
-      _secondsLeft = 60;
+      _secondsLeft = 30;
     });
+    if (_isBeaconActive) _startBeacon();
   }
 
   void _startTimer() {
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (_secondsLeft > 0) {
+      if (_secondsLeft > 0)
         setState(() => _secondsLeft--);
-      } else {
+      else
         _generateData();
-      }
     });
   }
 
   @override
   void dispose() {
     _timer?.cancel();
+    _stopBeacon();
     super.dispose();
   }
 
@@ -682,13 +1014,26 @@ class _QRDisplayDialogState extends State<_QRDisplayDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text(
-              'Yoklama QR Kodu',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: AppColors.textPrimary,
-              ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Text(
+                  'Yoklama QR Kodu',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                if (_isBeaconActive) ...[
+                  const SizedBox(width: 8),
+                  const Icon(
+                    Icons.bluetooth_searching_rounded,
+                    color: AppColors.primary,
+                    size: 20,
+                  ),
+                ],
+              ],
             ),
             const SizedBox(height: 8),
             Text(
@@ -743,12 +1088,6 @@ class _QRDisplayDialogState extends State<_QRDisplayDialog> {
               ],
             ),
             const SizedBox(height: 24),
-            const Text(
-              'Öğrenciler bu kodu okutarak yoklama verebilirler.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
-            ),
-            const SizedBox(height: 24),
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
@@ -783,15 +1122,12 @@ class _CustomCalendarDialog extends StatefulWidget {
     required this.initialDate,
     required this.isScheduledDay,
   });
-
   @override
   State<_CustomCalendarDialog> createState() => _CustomCalendarDialogState();
 }
 
 class _CustomCalendarDialogState extends State<_CustomCalendarDialog> {
-  late DateTime _displayedMonth;
-  late DateTime _selectedDate;
-
+  late DateTime _displayedMonth, _selectedDate;
   @override
   void initState() {
     super.initState();
@@ -810,10 +1146,8 @@ class _CustomCalendarDialogState extends State<_CustomCalendarDialog> {
     );
     final firstDay =
         DateTime(_displayedMonth.year, _displayedMonth.month, 1).weekday - 1;
-
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-      backgroundColor: Colors.white,
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -855,23 +1189,6 @@ class _CustomCalendarDialogState extends State<_CustomCalendarDialog> {
                 ),
               ],
             ),
-            const SizedBox(height: 10),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: ['P', 'S', 'Ç', 'P', 'C', 'C', 'P']
-                  .map(
-                    (d) => Text(
-                      d,
-                      style: const TextStyle(
-                        color: Colors.grey,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  )
-                  .toList(),
-            ),
-            const SizedBox(height: 10),
             GridView.builder(
               shrinkWrap: true,
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -896,7 +1213,6 @@ class _CustomCalendarDialogState extends State<_CustomCalendarDialog> {
                   date,
                   _selectedDate,
                 );
-
                 return InkWell(
                   onTap: isSched
                       ? () => setState(() => _selectedDate = date)
@@ -944,7 +1260,6 @@ class _CustomCalendarDialogState extends State<_CustomCalendarDialog> {
                 );
               },
             ),
-            const SizedBox(height: 24),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
@@ -955,7 +1270,6 @@ class _CustomCalendarDialogState extends State<_CustomCalendarDialog> {
                     style: TextStyle(color: Colors.grey),
                   ),
                 ),
-                const SizedBox(width: 12),
                 ElevatedButton(
                   onPressed: () => Navigator.pop(context, _selectedDate),
                   style: ElevatedButton.styleFrom(
@@ -974,36 +1288,6 @@ class _CustomCalendarDialogState extends State<_CustomCalendarDialog> {
           ],
         ),
       ),
-    );
-  }
-}
-
-// ── Stat Item Widget ───────────────────────────────────────
-class _StatItem extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _StatItem({required this.label, required this.value, Key? key})
-    : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Text(
-          value,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: const TextStyle(color: Colors.white70, fontSize: 12),
-        ),
-      ],
     );
   }
 }

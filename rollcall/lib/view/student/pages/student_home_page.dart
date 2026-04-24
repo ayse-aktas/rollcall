@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../../../core/utils/theme/colors/app_colors.dart';
 import 'course_attendance_detail_page.dart';
 import 'qr_scanner_page.dart';
+import '../../../core/services/beacon_attendance_service.dart';
 
 // ACADEMIC TERM DATES
 final DateTime TERM_START = DateTime(2026, 2, 9);
@@ -108,10 +109,23 @@ class _StudentHomePageState extends State<StudentHomePage> {
         _notifications = List<Map<String, dynamic>>.from(notifications);
         _isLoading = false;
       });
+
+      // Initialize Automatic Attendance Service
+      _initAutoAttendance(uid);
     } catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
     }
+  }
+
+  void _initAutoAttendance(String studentId) {
+    if (_courses.isEmpty) return;
+    
+    final service = BeaconAttendanceService();
+    service.init();
+    
+    final courseIds = _courses.map((e) => e['courses']['id'].toString()).toList();
+    service.subscribeToCourse(studentId, courseIds);
   }
 
   Future<void> _markAllAsRead() async {
