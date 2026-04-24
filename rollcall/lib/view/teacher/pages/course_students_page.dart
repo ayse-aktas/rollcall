@@ -222,13 +222,16 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
     // 1. Update Classroom to signal Hardware (ESP32)
     try {
       // Find Classroom ID from course data
-      final classroomId = _course?['classroom_id'] ?? _course?['classrooms']?['id'];
-      
+      final classroomId =
+          _course?['classroom_id'] ?? _course?['classrooms']?['id'];
+
       print('--- AUTOMATION DEBUG START ---');
       print('Target Classroom ID: $classroomId');
       print('Course Data Keys: ${_course?.keys.toList()}');
       if (_course?['classrooms'] != null) {
-        print('Classroom Data Keys: ${(_course?['classrooms'] as Map).keys.toList()}');
+        print(
+          'Classroom Data Keys: ${(_course?['classrooms'] as Map).keys.toList()}',
+        );
       }
 
       if (classroomId != null) {
@@ -236,18 +239,23 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
             .from('classrooms')
             .update({
               'is_automation_on': true,
-              'active_course_id': _course!['id'], // Donanımın hangi ders olduğunu bilmesi için
+              'active_course_id':
+                  _course!['id'], // Donanımın hangi ders olduğunu bilmesi için
             })
             .eq('id', classroomId.toString().trim())
             .select();
-            
+
         print('Supabase Update Response: $response');
-        
+
         if (response.isEmpty) {
           print('WARNING: Update successful but no rows were affected.');
-          print('!!! DİKKAT: Bu durum genelde Supabase RLS Policy (Update izni olmaması) kaynaklıdır.');
+          print(
+            '!!! DİKKAT: Bu durum genelde Supabase RLS Policy (Update izni olmaması) kaynaklıdır.',
+          );
         } else {
-          print('SUCCESS: Classroom automation flag set to TRUE with active_course_id');
+          print(
+            'SUCCESS: Classroom automation flag set to TRUE with active_course_id',
+          );
         }
       } else {
         print('ERROR: Classroom ID is NULL. Cannot update database.');
@@ -314,10 +322,7 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
     if (classroomId != null) {
       await _supabase
           .from('classrooms')
-          .update({
-            'is_automation_on': false,
-            'active_course_id': null
-          })
+          .update({'is_automation_on': false, 'active_course_id': null})
           .eq('id', classroomId);
     }
 
@@ -474,6 +479,14 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
           ),
         ),
         actions: [
+          IconButton(
+            icon: Icon(
+              _isRealtimeEnabled ? Icons.sync_rounded : Icons.sync_disabled_rounded,
+              color: _isRealtimeEnabled ? Colors.greenAccent : Colors.white70,
+            ),
+            tooltip: 'Canlı Takip',
+            onPressed: _toggleRealtime,
+          ),
           IconButton(
             icon: const Icon(Icons.analytics_outlined, color: Colors.white),
             onPressed: () {
