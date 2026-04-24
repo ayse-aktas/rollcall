@@ -239,8 +239,6 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
             .from('classrooms')
             .update({
               'is_automation_on': true,
-              'active_course_id':
-                  _course!['id'], // Donanımın hangi ders olduğunu bilmesi için
             })
             .eq('id', classroomId.toString().trim())
             .select();
@@ -315,21 +313,35 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
   Future<void> _stopAutomaticAttendance() async {
     _automationCountdownTimer?.cancel();
 
-    // Reset database flag for hardware (Classroom only)
-    final classroomId =
-        _course?['classroom_id'] ?? _course?['classrooms']?['id'];
-
-    if (classroomId != null) {
-      await _supabase
-          .from('classrooms')
-          .update({'is_automation_on': false, 'active_course_id': null})
-          .eq('id', classroomId);
-    }
-
+    // 1. Update UI state immediately so it doesn't get stuck at (0 s)
     setState(() {
       _isAutomationRunning = false;
       _automationTimer = 0;
     });
+
+    // 2. Reset database flag for hardware (Classroom only)
+    try {
+      final classroomId =
+          _course?['classroom_id'] ?? _course?['classrooms']?['id'];
+
+      if (classroomId != null) {
+        await _supabase
+            .from('classrooms')
+            .update({'is_automation_on': false})
+            .eq('id', classroomId.toString().trim());
+        
+        print('SUCCESS: Classroom automation flag set to FALSE');
+      }
+      
+      // 3. Optional: Send broadcast to students that automation ended
+      await _realtimeChannel?.sendBroadcastMessage(
+        event: 'stop_automation',
+        payload: {'course_id': _course?['id']},
+      );
+    } catch (e) {
+      print('ERROR while stopping automation: $e');
+      // Even if network fails, UI already updated
+    }
   }
 
   void _toggleRealtime() {
