@@ -1,202 +1,149 @@
-/*
- * RollCall System - ESP32 Smart Attendance Controller
- * NİMBLE RAM OPTIMIZED & SSL BYPASS VERSION
- */
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEScan.h>
+#include <BLEAdvertisedDevice.h>
 
-#include <Arduino.h>
-#include <WiFi.h>
-#include <HTTPClient.h>
-#include <NimBLEDevice.h> // STANDART BLE YERİNE NİMBLE KULLANIYORUZ
-#include <WiFiClientSecure.h>
-#include "time.h"
+// Scan süresi (saniye)
+#define SCAN_TIME 10
 
-// --- AYARLAR ---
-const char* ssid       = "Esp8266";          
-const char* password   = "esp8266.";      
-
-const char* supabaseHost = "vytqqwrcmmjuutysxwxl.supabase.co";
-const char* supabaseKey  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ5dHFxd3JjbW1qdXV0eXN4d3hsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyNTg2ODEsImV4cCI6MjA4OTgzNDY4MX0.aRPGwB93MYCam9gxC_08FDeKY6MQdwui9Mq94PSnFcQ"; 
-const char* classroomId  = "7023ba8c-6535-4185-bf45-c04a8aae8a7e";
-
-const char* ntpServer     = "pool.ntp.org";
-const long  gmtOffset_sec = 10800;           
-
-#define SCAN_DURATION  5                      
-
-// Global Değişkenler
-bool isAttendanceActive = false;
-unsigned long lastStatusCheck = 0;
-unsigned long lastScanTime = 0;
-String currentCourseId = "";
-
-struct FoundStudent {
-  uint16_t schoolNo;
-  int rssi;
-  bool recorded;
+// RollCall Öğrenci iBeacon UUID (küçük harf, tire yok)
+// E2C56DB5-DFFB-48D2-B060-D0F5A71096B1
+const uint8_t ROLLCALL_UUID[] = {
+  0xE2, 0xC5, 0x6D, 0xB5, 0xDF, 0xFB, 0x48, 0xD2,
+  0xB0, 0x60, 0xD0, 0xF5, 0xA7, 0x10, 0x96, 0xB1
 };
 
-const int MAX_STUDENTS = 50;
-FoundStudent foundStudents[MAX_STUDENTS];
-int studentCount = 0;
+// Beklenen Major ID (uygulamada 999 olarak ayarlandı)
+const uint16_t EXPECTED_MAJOR = 999;
 
-NimBLEScan* pBLEScan;
-WiFiClientSecure client;
+BLEScan* pBLEScan;
+int appInstalledCount = 0;
 
-// --- FONKSİYONLAR ---
+// Bulunan öğrencilerin minor ID'lerini sakla (max 50)
+uint16_t foundStudents[50];
+int foundStudentCount = 0;
 
-void markStudentPresent(uint16_t schoolNo) {
-  if (WiFi.status() != WL_CONNECTED) return;
+// iBeacon manufacturer data'dan UUID kontrolü yap
+bool checkBeaconUUID(BLEAdvertisedDevice& device, uint16_t& outMajor, uint16_t& outMinor) {
+  if (!device.haveManufacturerData()) return false;
   
-  HTTPClient http;
-  client.setInsecure(); 
-  client.setTimeout(15000); 
-
-  String url = "https://" + String(supabaseHost) + "/rest/v1/rpc/mark_present_by_school_no";
+  String mfData = device.getManufacturerData();
   
-  if (http.begin(client, url)) {
-    http.addHeader("apikey", supabaseKey);
-    http.addHeader("Authorization", "Bearer " + String(supabaseKey));
-    http.addHeader("Content-Type", "application/json");
-    http.addHeader("User-Agent", "Mozilla/5.0 (ESP32; Mobile)"); 
-    
-    String jsonBody = "{\"p_school_no\": \"" + String(schoolNo) + "\", \"p_course_id\": \"" + currentCourseId + "\"}";
-    
-    int httpCode = http.POST(jsonBody);
-    if (httpCode > 0) {
-      Serial.printf("  [KAYIT] Okul No %u -> HTTP: %d\n", schoolNo, httpCode);
-      if (httpCode == 200 || httpCode == 204) {
-         for (int i = 0; i < studentCount; i++) {
-           if (foundStudents[i].schoolNo == schoolNo) foundStudents[i].recorded = true;
-         }
-      }
-    } else {
-      Serial.printf("  [KAYIT HATA] %s\n", http.errorToString(httpCode).c_str());
-    }
-    http.end();
+  // Minimum 24 byte olmali
+  if (mfData.length() < 24) return false;
+  
+  const uint8_t* data = (const uint8_t*)mfData.c_str();
+  int uuidOffset = -1;
+  
+  // Format 1: iBeacon (Apple) -> bytes[2]=0x02, bytes[3]=0x15
+  if (mfData.length() >= 25 && data[2] == 0x02 && data[3] == 0x15) {
+    uuidOffset = 4;
   }
+  // Format 2: AltBeacon (Android) -> bytes[2]=0xBE, bytes[3]=0xAC
+  else if (mfData.length() >= 24 && data[2] == 0xBE && data[3] == 0xAC) {
+    uuidOffset = 4;
+  }
+  
+  if (uuidOffset < 0) return false;
+  
+  // UUID karsilastir (16 byte)
+  for (int i = 0; i < 16; i++) {
+    if (data[uuidOffset + i] != ROLLCALL_UUID[i]) return false;
+  }
+  
+  // Major ve Minor oku (Big Endian)
+  outMajor = (data[uuidOffset + 16] << 8) | data[uuidOffset + 17];
+  outMinor = (data[uuidOffset + 18] << 8) | data[uuidOffset + 19];
+  
+  return true;
 }
 
-void checkAttendanceStatus() {
-  if (WiFi.status() != WL_CONNECTED) return;
-
-  HTTPClient http;
-  client.setInsecure();
-  client.setTimeout(10000); 
-
-  String url = "https://" + String(supabaseHost) + "/rest/v1/classrooms?select=is_automation_on,is_automation_on&id=eq." + String(classroomId);
-  
-  if (http.begin(client, url)) {
-    http.addHeader("apikey", supabaseKey);
-    http.addHeader("Authorization", "Bearer " + String(supabaseKey));
-    http.addHeader("User-Agent", "Mozilla/5.0 (ESP32; Mobile)"); 
-    
-    int httpCode = http.GET();
-    if (httpCode == 200) {
-      String payload = http.getString();
-      bool newStatus = payload.indexOf("\"is_automation_on\":true") != -1;
+class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
+    void onResult(BLEAdvertisedDevice advertisedDevice) {
+      bool isAppInstalled = false;
+      uint16_t major = 0, minor = 0;
       
-      if (newStatus && !isAttendanceActive) {
-        Serial.println("\n>>> [SİSTEM] Yoklama Başlatıldı!");
-        isAttendanceActive = true;
-        studentCount = 0;
-      } else if (!newStatus && isAttendanceActive) {
-        Serial.println("\n>>> [SİSTEM] Yoklama Durduruldu!");
-        isAttendanceActive = false;
-      }
-      
-      int idx = payload.indexOf("\"is_automation_on\":\"");
-      if (idx != -1) {
-        int start = idx + 20;
-        int end = payload.indexOf("\"", start);
-        currentCourseId = payload.substring(start, end);
-      }
-    } else {
-      Serial.printf(">>> [HATA] HTTP Kod: %d | Detay: %s\n", httpCode, http.errorToString(httpCode).c_str());
-      if (httpCode == -1) client.stop();
-    }
-    http.end();
-  }
-}
-
-// --- NİMBLE CALLBACK (BELLEK DOSTU TARAMA) ---
-class MyCallbacks: public NimBLEScanCallbacks {    
-  void onResult(NimBLEAdvertisedDevice* dev) {
-      if (dev->haveManufacturerData()) {
-        std::string data = dev->getManufacturerData();
-        
-        // Apple iBeacon (0x4C) kontrolü
-        if (data.length() >= 25 && (uint8_t)data[0] == 0x4C) {
-          // Öğrenci Okul No (Minor) değeri verinin 22. ve 23. byte'larında saklıdır
-          uint16_t minor = ((uint8_t)data[22] << 8) | (uint8_t)data[23];
-          
-          bool exists = false;
-          for(int i=0; i<studentCount; i++) {
-            if(foundStudents[i].schoolNo == minor) {
-              exists = true; 
-              break;
-            }
-          }
-          
-          if(!exists && studentCount < MAX_STUDENTS) {
-            foundStudents[studentCount] = {minor, dev->getRSSI(), false};
-            studentCount++;
-            Serial.printf("  + Cihaz Algılandı: %u (RSSI: %d)\n", minor, dev->getRSSI());
-          }
+      // iBeacon veya AltBeacon manufacturer data icinden UUID kontrolu
+      if (checkBeaconUUID(advertisedDevice, major, minor)) {
+        if (major == EXPECTED_MAJOR) {
+          isAppInstalled = true;
         }
       }
+      
+      Serial.println("================================");
+      Serial.print("Cihaz: ");
+      Serial.println(advertisedDevice.haveName() ? advertisedDevice.getName().c_str() : "Bilinmeyen Cihaz");
+      Serial.print("MAC: ");
+      Serial.println(advertisedDevice.getAddress().toString().c_str());
+      Serial.print("Sinyal: ");
+      Serial.print(advertisedDevice.getRSSI());
+      Serial.println(" dBm");
+      
+      Serial.print("RollCall Uygulama: ");
+      if (isAppInstalled) {
+          Serial.print("TRUE  |  Ogrenci No (Minor): ");
+          Serial.println(minor);
+          // Listeye ekle (tekrar eklememek için kontrol)
+          bool alreadyFound = false;
+          for (int i = 0; i < foundStudentCount; i++) {
+            if (foundStudents[i] == minor) { alreadyFound = true; break; }
+          }
+          if (!alreadyFound && foundStudentCount < 50) {
+            foundStudents[foundStudentCount++] = minor;
+          }
+          appInstalledCount++;
+      } else {
+          Serial.println("FALSE");
+      }
+      Serial.println("================================\n");
     }
 };
 
 void setup() {
   Serial.begin(115200);
   delay(1000);
-
-  WiFi.begin(ssid, password);
-  Serial.print("WiFi'ya bağlanılıyor");
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("\n✓ WiFi Bağlandı.");
-
-  configTime(gmtOffset_sec, 0, ntpServer);
-  struct tm timeinfo;
-  if(!getLocalTime(&timeinfo)){
-    Serial.println("Saati alma başarısız!");
-  } else {
-    Serial.println("✓ Saat Senkronize Edildi.");
-  }
-
-  // RAM DOSTU NİMBLE BAŞLATILIYOR
-  NimBLEDevice::init("RollCall_Hardware");
-  pBLEScan = NimBLEDevice::getScan();
-  pBLEScan->setScanCallbacks(new MyCallbacks());
-  pBLEScan->setActiveScan(true);
+  
+  Serial.println("\n====================================");
+  Serial.println("  RollCall Akilli Yoklama Sistemi");
+  Serial.println("  Ogrenci Tespit Modu");
+  Serial.println("====================================\n");
+  
+  BLEDevice::init("");
+  pBLEScan = BLEDevice::getScan();
+  pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
+  pBLEScan->setActiveScan(true); 
   pBLEScan->setInterval(100);
   pBLEScan->setWindow(99);
-
-  Serial.println(">>> Sistem Hazır, Supabase dinleniyor...");
 }
 
 void loop() {
-  if (millis() - lastStatusCheck > 3000) {
-    lastStatusCheck = millis();
-    checkAttendanceStatus();
-  }
+  appInstalledCount = 0;
+  foundStudentCount = 0;
   
-  if (isAttendanceActive && (millis() - lastScanTime > 10000)) {
-    lastScanTime = millis();
-    Serial.println("\n>>> BLE Taraması Başlatılıyor...");
-    pBLEScan->start(SCAN_DURATION, false);
-    
-    for(int i=0; i<studentCount; i++) {
-      if(!foundStudents[i].recorded) {
-        markStudentPresent(foundStudents[i].schoolNo);
-        delay(200); 
-      }
+  Serial.println("\n--- TARAMA BASLIYOR ---");
+  
+  pBLEScan->start(SCAN_TIME, false);
+  
+  Serial.println("\n====================================");
+  Serial.println("        TARAMA SONUCU");
+  Serial.println("====================================");
+  Serial.print("Toplam Cihaz       : ");
+  Serial.println(pBLEScan->getResults()->getCount());
+  Serial.print("Uygulama Yuklu     : ");
+  Serial.println(appInstalledCount);
+  Serial.print("Benzersiz Ogrenci  : ");
+  Serial.println(foundStudentCount);
+  
+  if (foundStudentCount > 0) {
+    Serial.println("------------------------------------");
+    Serial.println("Bulunan Ogrenci Numaralari:");
+    for (int i = 0; i < foundStudentCount; i++) {
+      Serial.print("  -> ");
+      Serial.println(foundStudents[i]);
     }
-    pBLEScan->clearResults();
-    Serial.println(">>> Tarama ve Kayıt Döngüsü Tamamlandı.");
   }
-  delay(10);
+  Serial.println("====================================\n");
+  
+  pBLEScan->clearResults();
+  delay(5000); 
 }

@@ -239,6 +239,8 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
             .from('classrooms')
             .update({
               'is_automation_on': true,
+              'active_course_id':
+                  _course!['id'], // Donanımın hangi ders olduğunu bilmesi için
             })
             .eq('id', classroomId.toString().trim())
             .select();
@@ -327,12 +329,12 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
       if (classroomId != null) {
         await _supabase
             .from('classrooms')
-            .update({'is_automation_on': false})
+            .update({'is_automation_on': false, 'active_course_id': null})
             .eq('id', classroomId.toString().trim());
-        
+
         print('SUCCESS: Classroom automation flag set to FALSE');
       }
-      
+
       // 3. Optional: Send broadcast to students that automation ended
       await _realtimeChannel?.sendBroadcastMessage(
         event: 'stop_automation',
@@ -493,7 +495,9 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
         actions: [
           IconButton(
             icon: Icon(
-              _isRealtimeEnabled ? Icons.sync_rounded : Icons.sync_disabled_rounded,
+              _isRealtimeEnabled
+                  ? Icons.sync_rounded
+                  : Icons.sync_disabled_rounded,
               color: _isRealtimeEnabled ? Colors.greenAccent : Colors.white70,
             ),
             tooltip: 'Canlı Takip',

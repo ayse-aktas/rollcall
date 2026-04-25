@@ -77,6 +77,13 @@ class _StudentHomePageState extends State<StudentHomePage> {
     _loadData();
   }
 
+  @override
+  void dispose() {
+    // Sayfa kapanırken BLE yayınını durdur
+    BeaconAttendanceService().stopContinuousBroadcast();
+    super.dispose();
+  }
+
   Future<void> _loadData() async {
     final uid = _supabase.auth.currentUser?.id;
     if (uid == null) return;
@@ -126,6 +133,10 @@ class _StudentHomePageState extends State<StudentHomePage> {
     
     final courseIds = _courses.map((e) => e['courses']['id'].toString()).toList();
     service.subscribeToCourse(studentId, courseIds);
+
+    // Uygulama açıkken sürekli BLE yayını başlat (ESP32 tespit edebilsin)
+    final schoolNo = _profile?['school_no']?.toString() ?? '0';
+    service.startContinuousBroadcast(schoolNo);
   }
 
   Future<void> _markAllAsRead() async {

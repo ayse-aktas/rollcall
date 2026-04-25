@@ -4,6 +4,7 @@ import 'package:flutter_beacon/flutter_beacon.dart' hide BeaconBroadcast;
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:beacon_broadcast/beacon_broadcast.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class BeaconAttendanceService {
   static final BeaconAttendanceService _instance =
@@ -18,6 +19,7 @@ class BeaconAttendanceService {
 
   StreamSubscription? _beaconSubscription;
   bool _isScanning = false;
+  bool _isContinuousBroadcasting = false;
 
   // Faculty Coordinates (Example: Sakarya University Engineering Faculty)
   static const double FACULTY_LAT = 40.742347;
@@ -32,6 +34,73 @@ class BeaconAttendanceService {
         InitializationSettings(android: androidInit, iOS: iosInit);
 
     await _notifications.initialize(settings: initializationSettings);
+  }
+
+  /// Uygulama açıkken sürekli BLE yayını başlat
+  /// ESP32 bu yayını algılayarak öğrenciyi tespit edecek
+  Future<void> startContinuousBroadcast(String schoolNo) async {
+    if (_isContinuousBroadcasting) return;
+    
+    try {
+      // Önce gerekli izinleri iste (Android 12+ için zorunlu)
+      print('📱 Bluetooth izinleri isteniyor...');
+      
+      final advertiseStatus = await Permission.bluetoothAdvertise.request();
+      final scanStatus = await Permission.bluetoothScan.request();
+      final connectStatus = await Permission.bluetoothConnect.request();
+      final locationStatus = await Permission.locationWhenInUse.request();
+      
+      print('📱 Advertise izni: $advertiseStatus');
+      print('📱 Scan izni: $scanStatus');
+      print('📱 Connect izni: $connectStatus');
+      print('📱 Location izni: $locationStatus');
+      
+      if (!advertiseStatus.isGranted) {
+        print('⚠️ BLUETOOTH_ADVERTISE izni verilmedi! Yayın yapılamaz.');
+        return;
+      }
+
+      // Cihaz beacon yayını destekliyor mu kontrol et
+      final isSupported = await _beaconBroadcast.checkTransmissionSupported();
+      print('📡 Beacon Transmit Desteği: $isSupported');
+      
+      if (isSupported != BeaconStatus.supported) {
+        print('⚠️ Bu cihaz beacon yayını desteklemiyor: $isSupported');
+        return;
+      }
+
+      int studentMinor =
+          int.tryParse(schoolNo.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
+      studentMinor = studentMinor % 65535;
+      if (studentMinor == 0) studentMinor = 1;
+
+      print('🟢 Sürekli BLE Yayını Başlatılıyor - Minor: $studentMinor');
+
+      _beaconBroadcast
+          .setUUID('E2C56DB5-DFFB-48D2-B060-D0F5A71096B1')
+          .setMajorId(999)
+          .setMinorId(studentMinor)
+          .setTransmissionPower(-59)
+          .start();
+
+      _isContinuousBroadcasting = true;
+      print('🟢 BLE Yayını Aktif!');
+    } catch (e) {
+      print('❌ BLE Yayın Hatası: $e');
+      print('💡 Bluetooth izinlerini kontrol edin (Ayarlar > Uygulamalar > rollcall > İzinler)');
+    }
+  }
+
+  /// Uygulama kapanırken yayını durdur
+  void stopContinuousBroadcast() {
+    if (!_isContinuousBroadcasting) return;
+    try {
+      _beaconBroadcast.stop();
+      _isContinuousBroadcasting = false;
+      print('🔴 Sürekli BLE Yayını Durduruldu');
+    } catch (e) {
+      print('❌ BLE Durdurma Hatası: $e');
+    }
   }
 
   void subscribeToCourse(String studentId, List<String> courseIds) {
@@ -61,12 +130,12 @@ class BeaconAttendanceService {
       final expectedMajor = payload['major'];
 
       // 1. GPS Check
-      bool isInFaculty = await _checkLocation();
-      if (!isInFaculty) {
-        print('Security Reject: Not in Faculty');
-        _isScanning = false;
-        return;
-      }
+      // bool isInFaculty = await _checkLocation();
+      // if (!isInFaculty) {
+      //   print('Security Reject: Not in Faculty');
+      //   _isScanning = false;
+      //   return;
+      // }
 
       // 2. Start Beacon Scan
       await _startScanning(expectedMajor, (minor) async {
