@@ -104,9 +104,8 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
       ? TERM_START
       : (DateTime.now().isAfter(TERM_END) ? TERM_END : DateTime.now());
 
-  StreamSubscription? _attendanceSubscription;
   RealtimeChannel? _realtimeChannel;
-  bool _isRealtimeEnabled = false;
+
   bool _isAutomationRunning = false;
   int _automationTimer = 0;
   Timer? _automationCountdownTimer;
@@ -168,9 +167,6 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
       _isLoading = false;
     });
 
-    if (_isRealtimeEnabled) {
-      _initRealtime();
-    }
     _setupRealtimeChannel();
   }
 
@@ -184,32 +180,7 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
     _realtimeChannel!.subscribe();
   }
 
-  void _initRealtime() {
-    _attendanceSubscription?.cancel();
 
-    final courseId = _course!['id'];
-    final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
-
-    _attendanceSubscription = _supabase
-        .from('attendance')
-        .stream(primaryKey: ['student_id', 'course_id', 'date'])
-        .listen((List<Map<String, dynamic>> data) {
-          final Map<String, bool> newMap = {};
-
-          final filteredData = data.where(
-            (r) => r['course_id'] == courseId && r['date'] == dateStr,
-          );
-
-          for (var record in filteredData) {
-            newMap[record['student_id']] = record['is_present'] ?? false;
-          }
-          if (mounted) {
-            setState(() {
-              _attendanceMap = newMap;
-            });
-          }
-        });
-  }
 
   void _startAutomaticAttendance() async {
     if (_isAutomationRunning) return;
@@ -219,46 +190,20 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
       _automationTimer = 60;
     });
 
-    // 1. Update Classroom to signal Hardware (ESP32)
+    // Sınıf veritabanı güncelle (ESP32 tetikleme)
     try {
-      // Find Classroom ID from course data
       final classroomId =
           _course?['classroom_id'] ?? _course?['classrooms']?['id'];
 
-      print('--- AUTOMATION DEBUG START ---');
-      print('Target Classroom ID: $classroomId');
-      print('Course Data Keys: ${_course?.keys.toList()}');
-      if (_course?['classrooms'] != null) {
-        print(
-          'Classroom Data Keys: ${(_course?['classrooms'] as Map).keys.toList()}',
-        );
-      }
-
       if (classroomId != null) {
-        final response = await _supabase
+        await _supabase
             .from('classrooms')
             .update({
               'is_automation_on': true,
-              'active_course_id':
-                  _course!['id'], // Donanımın hangi ders olduğunu bilmesi için
+              'active_course_id': _course!['id'],
             })
-            .eq('id', classroomId.toString().trim())
-            .select();
-
-        print('Supabase Update Response: $response');
-
-        if (response.isEmpty) {
-          print('WARNING: Update successful but no rows were affected.');
-          print(
-            '!!! DİKKAT: Bu durum genelde Supabase RLS Policy (Update izni olmaması) kaynaklıdır.',
-          );
-        } else {
-          print(
-            'SUCCESS: Classroom automation flag set to TRUE with active_course_id',
-          );
-        }
+            .eq('id', classroomId.toString().trim());
       } else {
-        print('ERROR: Classroom ID is NULL. Cannot update database.');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -268,9 +213,7 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
           );
         }
       }
-      print('--- AUTOMATION DEBUG END ---');
     } catch (e) {
-      print('CRITICAL UPDATE ERROR: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -331,8 +274,6 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
             .from('classrooms')
             .update({'is_automation_on': false, 'active_course_id': null})
             .eq('id', classroomId.toString().trim());
-
-        print('SUCCESS: Classroom automation flag set to FALSE');
       }
 
       // 3. Optional: Send broadcast to students that automation ended
@@ -341,23 +282,13 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
         payload: {'course_id': _course?['id']},
       );
     } catch (e) {
-      print('ERROR while stopping automation: $e');
-      // Even if network fails, UI already updated
+      // Ağ hatası olsa bile UI zaten güncellendi
     }
+
+    // Otomatik yoklama bitince yoklama verilerini güncelle
+    await _loadData();
   }
 
-  void _toggleRealtime() {
-    setState(() {
-      _isRealtimeEnabled = !_isRealtimeEnabled;
-      if (_isRealtimeEnabled) {
-        _initRealtime();
-      } else {
-        _attendanceSubscription?.cancel();
-      }
-    });
-  }
-
-  // ... (rest of the class remains same)
   Future<void> _toggleAttendance(String studentId, bool? currentVal) async {
     final newVal = !(currentVal ?? false);
     final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
@@ -461,9 +392,6 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final courseName = _course != null
-        ? _course!['course_name']
-        : 'Ders Detayı';
     final courseTimeRaw = _course?['course_time'] ?? '';
     final courseEndTimeRaw = _course?['course_end_time'] ?? '';
     final dateDisplay = DateFormat('dd MMMM yyyy').format(_selectedDate);
@@ -475,7 +403,6 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
       appBar: AppBar(
         backgroundColor: AppColors.primary,
         elevation: 0,
-        centerTitle: true,
         leading: IconButton(
           icon: const Icon(
             Icons.arrow_back_ios_new_rounded,
@@ -484,25 +411,7 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
           ),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text(
-          _translateCourseName(courseName),
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 17,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
         actions: [
-          IconButton(
-            icon: Icon(
-              _isRealtimeEnabled
-                  ? Icons.sync_rounded
-                  : Icons.sync_disabled_rounded,
-              color: _isRealtimeEnabled ? Colors.greenAccent : Colors.white70,
-            ),
-            tooltip: 'Canlı Takip',
-            onPressed: _toggleRealtime,
-          ),
           IconButton(
             icon: const Icon(Icons.analytics_outlined, color: Colors.white),
             onPressed: () {
@@ -514,10 +423,6 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                 );
               }
             },
-          ),
-          IconButton(
-            icon: const Icon(Icons.qr_code_2_rounded, color: Colors.white),
-            onPressed: _canOpenQR() ? _showQRCode : null,
           ),
           const SizedBox(width: 8),
         ],
@@ -761,19 +666,7 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
               fontWeight: FontWeight.bold,
             ),
           ),
-          if (_isRealtimeEnabled) ...[
-            const SizedBox(width: 8),
-            const Icon(Icons.circle, color: AppColors.success, size: 8),
-            const SizedBox(width: 4),
-            const Text(
-              'CANLI',
-              style: TextStyle(
-                color: AppColors.success,
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ],
+
           const Spacer(),
           const Text(
             'Sıralama: Okul No',
@@ -799,7 +692,6 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
 
   @override
   void dispose() {
-    _attendanceSubscription?.cancel();
     _automationCountdownTimer?.cancel();
     if (_realtimeChannel != null) {
       _supabase.removeChannel(_realtimeChannel!);
