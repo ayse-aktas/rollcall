@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_beacon/flutter_beacon.dart' hide BeaconBroadcast;
-import 'package:geolocator/geolocator.dart';
+// import 'package:geolocator/geolocator.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:beacon_broadcast/beacon_broadcast.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -36,25 +38,41 @@ class BeaconAttendanceService {
     await _notifications.initialize(settings: initializationSettings);
   }
 
+  /// Okul numarasını SHA256 ile hashleyip Major + Minor ID üret
+  /// SHA256 → 32 byte hash → ilk 2 byte = Major, sonraki 2 byte = Minor
+  /// Bu sayede herhangi bir uzunluktaki okul numarası 32-bit'e sığar
+  /// ~4.3 milyar farklı kombinasyon = çakışma riski neredeyse sıfır
+  static Map<String, int> hashSchoolNo(String schoolNo) {
+    final bytes = utf8.encode(schoolNo.trim().toUpperCase());
+    final hash = sha256.convert(bytes);
+
+    // İlk 2 byte → Major (0-65535)
+    final major = (hash.bytes[0] << 8) | hash.bytes[1];
+    // Sonraki 2 byte → Minor (0-65535)
+    final minor = (hash.bytes[2] << 8) | hash.bytes[3];
+
+    return {'major': major, 'minor': minor};
+  }
+
   /// Uygulama açıkken sürekli BLE yayını başlat
   /// ESP32 bu yayını algılayarak öğrenciyi tespit edecek
   Future<void> startContinuousBroadcast(String schoolNo) async {
     if (_isContinuousBroadcasting) return;
-    
+
     try {
       // Önce gerekli izinleri iste (Android 12+ için zorunlu)
       print('📱 Bluetooth izinleri isteniyor...');
-      
+
       final advertiseStatus = await Permission.bluetoothAdvertise.request();
       final scanStatus = await Permission.bluetoothScan.request();
       final connectStatus = await Permission.bluetoothConnect.request();
       final locationStatus = await Permission.locationWhenInUse.request();
-      
+
       print('📱 Advertise izni: $advertiseStatus');
       print('📱 Scan izni: $scanStatus');
       print('📱 Connect izni: $connectStatus');
       print('📱 Location izni: $locationStatus');
-      
+
       if (!advertiseStatus.isGranted) {
         print('⚠️ BLUETOOTH_ADVERTISE izni verilmedi! Yayın yapılamaz.');
         return;
@@ -63,23 +81,25 @@ class BeaconAttendanceService {
       // Cihaz beacon yayını destekliyor mu kontrol et
       final isSupported = await _beaconBroadcast.checkTransmissionSupported();
       print('📡 Beacon Transmit Desteği: $isSupported');
-      
+
       if (isSupported != BeaconStatus.supported) {
         print('⚠️ Bu cihaz beacon yayını desteklemiyor: $isSupported');
         return;
       }
 
-      int studentMinor =
-          int.tryParse(schoolNo.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
-      studentMinor = studentMinor % 65535;
-      if (studentMinor == 0) studentMinor = 1;
+      // Okul numarasını SHA256 ile hashle → Major + Minor olarak yayınla
+      final hashResult = hashSchoolNo(schoolNo);
+      final int hashMajor = hashResult['major']!;
+      final int hashMinor = hashResult['minor']!;
 
-      print('🟢 Sürekli BLE Yayını Başlatılıyor - Minor: $studentMinor');
+      print('🟢 Sürekli BLE Yayını Başlatılıyor');
+      print('   Okul No: $schoolNo');
+      print('   Hash Major: $hashMajor, Hash Minor: $hashMinor');
 
       _beaconBroadcast
           .setUUID('E2C56DB5-DFFB-48D2-B060-D0F5A71096B1')
-          .setMajorId(999)
-          .setMinorId(studentMinor)
+          .setMajorId(hashMajor)
+          .setMinorId(hashMinor)
           .setTransmissionPower(-59)
           .start();
 
@@ -87,7 +107,9 @@ class BeaconAttendanceService {
       print('🟢 BLE Yayını Aktif!');
     } catch (e) {
       print('❌ BLE Yayın Hatası: $e');
-      print('💡 Bluetooth izinlerini kontrol edin (Ayarlar > Uygulamalar > rollcall > İzinler)');
+      print(
+        '💡 Bluetooth izinlerini kontrol edin (Ayarlar > Uygulamalar > rollcall > İzinler)',
+      );
     }
   }
 
@@ -152,24 +174,24 @@ class BeaconAttendanceService {
     }
   }
 
-  Future<bool> _checkLocation() async {
-    try {
-      Position position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      );
+  // Future<bool> _checkLocation() async {
+  //   try {
+  //     Position position = await Geolocator.getCurrentPosition(
+  //       desiredAccuracy: LocationAccuracy.high,
+  //     );
 
-      double distance = Geolocator.distanceBetween(
-        position.latitude,
-        position.longitude,
-        FACULTY_LAT,
-        FACULTY_LNG,
-      );
+  //     double distance = Geolocator.distanceBetween(
+  //       position.latitude,
+  //       position.longitude,
+  //       FACULTY_LAT,
+  //       FACULTY_LNG,
+  //     );
 
-      return distance <= GEOFENCE_RADIUS;
-    } catch (e) {
-      return false;
-    }
-  }
+  //     return distance <= GEOFENCE_RADIUS;
+  //   } catch (e) {
+  //     return false;
+  //   }
+  // }
 
   Future<void> _startScanning(int major, Function(int) onFound) async {
     await flutterBeacon.initializeScanning;
