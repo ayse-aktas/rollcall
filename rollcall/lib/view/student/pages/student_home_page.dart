@@ -179,14 +179,55 @@ class _StudentHomePageState extends State<StudentHomePage> {
       
       // Then local state
       setState(() {
-        final index = _notifications.indexWhere((n) => n['id'] == id);
+        final index = _notifications.indexWhere((n) => n['id'].toString() == id);
         if (index != -1) _notifications[index]['is_read'] = true;
       });
     } catch (e) {
       debugPrint('ERROR in markAsRead: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Bildirim okundu yapılamadı: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Bildirim okundu yapılamadı: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteAllReadNotifications() async {
+    final readIds = _notifications
+        .where((n) => n['is_read'] == true)
+        .map((n) => n['id'])
+        .toList();
+
+    if (readIds.isEmpty) return;
+
+    try {
+      await _supabase.from('notifications').delete().inFilter('id', readIds);
+      setState(() {
+        _notifications.removeWhere((n) => n['is_read'] == true);
+      });
+    } catch (e) {
+      debugPrint('ERROR in _deleteAllReadNotifications: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Okunan bildirimler silinemedi.')),
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteNotification(String id) async {
+    try {
+      await _supabase.from('notifications').delete().eq('id', id);
+      setState(() {
+        _notifications.removeWhere((n) => n['id'].toString() == id);
+      });
+    } catch (e) {
+      debugPrint('ERROR in _deleteNotification: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Bildirim silinemedi.')),
+        );
+      }
     }
   }
 
@@ -199,6 +240,8 @@ class _StudentHomePageState extends State<StudentHomePage> {
         notifications: _notifications,
         onMarkAllRead: _markAllAsRead,
         onMarkRead: _markAsRead,
+        onDeleteAllRead: _deleteAllReadNotifications,
+        onDeleteNotification: _deleteNotification,
       ),
     );
   }
@@ -419,74 +462,119 @@ class _HeaderIcon extends StatelessWidget {
 
 class _NotificationSheet extends StatefulWidget {
   final List<Map<String, dynamic>> notifications;
-  final VoidCallback onMarkAllRead;
-  final Function(String) onMarkRead;
+  final Future<void> Function() onMarkAllRead;
+  final Future<void> Function(String) onMarkRead;
+  final Future<void> Function() onDeleteAllRead;
+  final Future<void> Function(String) onDeleteNotification;
   
   const _NotificationSheet({
     required this.notifications, 
     required this.onMarkAllRead,
     required this.onMarkRead,
+    required this.onDeleteAllRead,
+    required this.onDeleteNotification,
   });
 
   @override
   State<_NotificationSheet> createState() => _NotificationSheetState();
 }
 
-class _NotificationSheetState extends State<_NotificationSheet> {
+class _NotificationSheetState extends State<_NotificationSheet> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(() {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final unread = widget.notifications.where((n) => n['is_read'] == false).toList();
     final read = widget.notifications.where((n) => n['is_read'] == true).toList();
 
-    return DefaultTabController(
-      length: 2,
-      child: Container(
-        height: MediaQuery.of(context).size.height * 0.8,
-        decoration: const BoxDecoration(
-          color: AppColors.background,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        child: Column(
-          children: [
-            Container(width: 40, height: 4, margin: const EdgeInsets.only(top: 10, bottom: 10), decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(2))),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Bildirim Merkezi', style: TextStyle(color: AppColors.textPrimary, fontSize: 22, fontWeight: FontWeight.w900)),
-                  if (unread.isNotEmpty)
-                    TextButton.icon(
-                      icon: const Icon(Icons.done_all_rounded, size: 18, color: AppColors.primary),
-                      label: const Text('Hepsini Oku', style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.primary)),
-                      onPressed: () {
-                        widget.onMarkAllRead();
-                      },
-                    ),
-                ],
-              ),
-            ),
-            TabBar(
-              labelColor: AppColors.primary,
-              unselectedLabelColor: AppColors.textSecondary,
-              indicatorColor: AppColors.primary,
-              indicatorWeight: 3,
-              labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-              tabs: [
-                Tab(text: 'YENİ (${unread.length})'),
-                Tab(text: 'OKUNANLAR (${read.length})'),
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.8,
+      decoration: const BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: Column(
+        children: [
+          Container(width: 40, height: 4, margin: const EdgeInsets.only(top: 10, bottom: 10), decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(2))),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Bildirim Merkezi', style: TextStyle(color: AppColors.textPrimary, fontSize: 22, fontWeight: FontWeight.w900)),
+                if (_tabController.index == 0 && unread.isNotEmpty)
+                  TextButton.icon(
+                    icon: const Icon(Icons.done_all_rounded, size: 18, color: AppColors.primary),
+                    label: const Text('Hepsini Oku', style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.primary)),
+                    onPressed: () async {
+                      await widget.onMarkAllRead();
+                      if (mounted) setState(() {});
+                    },
+                  )
+                else if (_tabController.index == 1 && read.isNotEmpty)
+                  TextButton.icon(
+                    icon: const Icon(Icons.delete_sweep_rounded, size: 18, color: AppColors.error),
+                    label: const Text('Toplu Sil', style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.error)),
+                    onPressed: () async {
+                      await widget.onDeleteAllRead();
+                      if (mounted) setState(() {});
+                    },
+                  ),
               ],
             ),
-            Expanded(
-              child: TabBarView(
-                children: [
-                  _NotificationList(notifications: unread, onMarkRead: (id) { widget.onMarkRead(id); }, isNew: true),
-                  _NotificationList(notifications: read, onMarkRead: (_) {}, isNew: false),
-                ],
-              ),
+          ),
+          TabBar(
+            controller: _tabController,
+            labelColor: AppColors.primary,
+            unselectedLabelColor: AppColors.textSecondary,
+            indicatorColor: AppColors.primary,
+            indicatorWeight: 3,
+            labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+            tabs: [
+              Tab(text: 'YENİ (${unread.length})'),
+              Tab(text: 'OKUNANLAR (${read.length})'),
+            ],
+          ),
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _NotificationList(
+                  notifications: unread, 
+                  onMarkRead: (id) async { 
+                    await widget.onMarkRead(id); 
+                    if (mounted) setState(() {});
+                  }, 
+                  isNew: true,
+                ),
+                _NotificationList(
+                  notifications: read, 
+                  onMarkRead: (_) {}, 
+                  onDelete: (id) async {
+                    await widget.onDeleteNotification(id);
+                    if (mounted) setState(() {});
+                  },
+                  isNew: false,
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -495,9 +583,15 @@ class _NotificationSheetState extends State<_NotificationSheet> {
 class _NotificationList extends StatelessWidget {
   final List<Map<String, dynamic>> notifications;
   final Function(String) onMarkRead;
+  final Function(String)? onDelete;
   final bool isNew;
   
-  const _NotificationList({required this.notifications, required this.onMarkRead, required this.isNew});
+  const _NotificationList({
+    required this.notifications, 
+    required this.onMarkRead, 
+    this.onDelete,
+    required this.isNew,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -548,10 +642,24 @@ class _NotificationList extends StatelessWidget {
                   child: const Icon(Icons.done_rounded, color: AppColors.primary, size: 18),
                 ),
               )
-            : Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(color: AppColors.success.withValues(alpha: 0.1), shape: BoxShape.circle),
-                child: const Icon(Icons.done_all_rounded, color: AppColors.success, size: 18),
+            : Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(color: AppColors.success.withValues(alpha: 0.1), shape: BoxShape.circle),
+                    child: const Icon(Icons.done_all_rounded, color: AppColors.success, size: 16),
+                  ),
+                  const SizedBox(width: 8),
+                  InkWell(
+                    onTap: () => onDelete?.call(id),
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(color: AppColors.error.withValues(alpha: 0.1), shape: BoxShape.circle),
+                      child: const Icon(Icons.delete_outline_rounded, color: AppColors.error, size: 16),
+                    ),
+                  ),
+                ],
               ),
           ),
         );

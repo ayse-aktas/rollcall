@@ -105,7 +105,7 @@ class _QRScannerPageState extends State<QRScannerPage> {
       // NEW: GPS & Beacon Secret Verification (Geofencing)
       final courseData = await supabase
           .from('courses')
-          .select('classrooms(beacon_secret, faculties(latitude, longitude, radius_meters))')
+          .select('*, classrooms(*, faculties(*))')
           .eq('id', courseId)
           .single();
 
@@ -113,8 +113,8 @@ class _QRScannerPageState extends State<QRScannerPage> {
 
       if (courseData['classrooms'] != null && courseData['classrooms']['faculties'] != null) {
         final faculty = courseData['classrooms']['faculties'];
-        final double targetLat = faculty['latitude'];
-        final double targetLng = faculty['longitude'];
+        final double targetLat = faculty['latitude'] ?? 0.0;
+        final double targetLng = faculty['longitude'] ?? 0.0;
         final int radius = faculty['radius_meters'] ?? 100;
 
         // Check GPS permissions
@@ -138,7 +138,7 @@ class _QRScannerPageState extends State<QRScannerPage> {
           throw 'Fakülte sınırları dışındasınız. Lütfen sınıfa girin. (Uzaklık: ${distance.toStringAsFixed(0)}m)';
         }
         
-        classroomSecret = faculty['beacon_secret'];
+        classroomSecret = courseData['classrooms']['beacon_secret'];
       }
 
       // SECURE MODE VALIDATION (Updated to use classroom secret)
@@ -187,7 +187,6 @@ class _QRScannerPageState extends State<QRScannerPage> {
           'course_id': courseId,
           'date': date,
           'is_present': true,
-          'verification_method': _proximityVerified ? 'qr_beacon' : 'qr_only', // Log safety level
         }, onConflict: 'student_id, course_id, date');
       } on PostgrestException catch (e) {
         if (e.code == '42501') {
@@ -210,8 +209,8 @@ class _QRScannerPageState extends State<QRScannerPage> {
       String errorMessage = e.toString();
       if (errorMessage.startsWith('Exception: ')) {
         errorMessage = errorMessage.substring(11);
-      } else if (errorMessage.contains('PostgrestException')) {
-        errorMessage = 'Veritabanı bağlantı hatası oluştu.';
+      } else if (e is PostgrestException) {
+        errorMessage = 'Veritabanı hatası: ${e.message}';
       }
       
       _showResultDialog(
