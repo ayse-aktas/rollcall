@@ -28,7 +28,7 @@ android {
         applicationId = "com.example.rollcall"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        minSdk = maxOf(flutter.minSdkVersion, 21) // ML Kit Object Detection requires >= 21
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
@@ -49,4 +49,9 @@ flutter {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+}
+
+configurations.all {
+    // firebase-iid is deprecated and conflicts with firebase-messaging
+    exclude(group = "com.google.firebase", module = "firebase-iid")
 }

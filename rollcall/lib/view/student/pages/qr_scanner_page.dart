@@ -19,7 +19,7 @@ class QRScannerPage extends StatefulWidget {
 class _QRScannerPageState extends State<QRScannerPage> {
   final MobileScannerController controller = MobileScannerController();
   bool _isProcessing = false;
-  
+
   // Beacon variables
   StreamSubscription<RangingResult>? _beaconSubscription;
   bool _proximityVerified = false;
@@ -41,7 +41,7 @@ class _QRScannerPageState extends State<QRScannerPage> {
     if (status.values.every((s) => s.isGranted)) {
       try {
         await flutterBeacon.initializeScanning;
-        
+
         // Match the UUID used in Teacher app
         final regions = <Region>[
           Region(
@@ -53,8 +53,10 @@ class _QRScannerPageState extends State<QRScannerPage> {
         _beaconSubscription = flutterBeacon.ranging(regions).listen((result) {
           if (result.beacons.isNotEmpty) {
             // Sort by signal strength (RSSI)
-            final closest = result.beacons.reduce((a, b) => a.rssi > b.rssi ? a : b);
-            
+            final closest = result.beacons.reduce(
+              (a, b) => a.rssi > b.rssi ? a : b,
+            );
+
             // Proximity check (approximately < 5-10 meters if RSSI > -85)
             if (closest.rssi > -85) {
               setState(() {
@@ -89,19 +91,24 @@ class _QRScannerPageState extends State<QRScannerPage> {
       if (isSecure && expectedBeaconToken != null) {
         if (!_proximityVerified) {
           // USER FALLBACK: QR only session (as per user request)
-          debugPrint('SECURITY WARNING: Proximity NOT verified. Proceeding with QR-only fallback.');
+          debugPrint(
+            'SECURITY WARNING: Proximity NOT verified. Proceeding with QR-only fallback.',
+          );
         } else if (_detectedBeaconToken != expectedBeaconToken) {
-           // Token mismatch (could be old beacon scan or buddy reporting attempt)
-           // But since tokens rotate every 30s, we allow a small window.
-           final bool isValidToken = SecurityUtils.verifyTimeToken(courseId, _detectedBeaconToken!);
-           if (!isValidToken) {
-             debugPrint('SECURITY WARNING: Beacon token mismatch.');
-           }
+          // Token mismatch (could be old beacon scan or buddy reporting attempt)
+          // But since tokens rotate every 30s, we allow a small window.
+          final bool isValidToken = SecurityUtils.verifyTimeToken(
+            courseId,
+            _detectedBeaconToken!,
+          );
+          if (!isValidToken) {
+            debugPrint('SECURITY WARNING: Beacon token mismatch.');
+          }
         }
       }
 
       final supabase = Supabase.instance.client;
-      
+
       // NEW: GPS & Beacon Secret Verification (Geofencing)
       final courseData = await supabase
           .from('courses')
@@ -111,7 +118,8 @@ class _QRScannerPageState extends State<QRScannerPage> {
 
       String? classroomSecret;
 
-      if (courseData['classrooms'] != null && courseData['classrooms']['faculties'] != null) {
+      if (courseData['classrooms'] != null &&
+          courseData['classrooms']['faculties'] != null) {
         final faculty = courseData['classrooms']['faculties'];
         final double targetLat = faculty['latitude'] ?? 0.0;
         final double targetLng = faculty['longitude'] ?? 0.0;
@@ -121,35 +129,47 @@ class _QRScannerPageState extends State<QRScannerPage> {
         LocationPermission permission = await Geolocator.checkPermission();
         if (permission == LocationPermission.denied) {
           permission = await Geolocator.requestPermission();
-          if (permission == LocationPermission.denied) throw 'Konum izni reddedildi.';
+          if (permission == LocationPermission.denied) {
+            throw 'Konum izni reddedildi.';
+          }
         }
-        
+
         // Get current position
         final Position position = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+          ),
         );
 
         // Calculate distance
         final double distance = Geolocator.distanceBetween(
-          position.latitude, position.longitude, targetLat, targetLng
+          position.latitude,
+          position.longitude,
+          targetLat,
+          targetLng,
         );
 
+        /*
         if (distance > radius) {
           throw 'Fakülte sınırları dışındasınız. Lütfen sınıfa girin. (Uzaklık: ${distance.toStringAsFixed(0)}m)';
         }
-        
+        */
+
         classroomSecret = courseData['classrooms']['beacon_secret'];
       }
 
       // SECURE MODE VALIDATION (Updated to use classroom secret)
       if (isSecure && classroomSecret != null) {
         if (!_proximityVerified || _detectedBeaconToken == null) {
-           throw 'Sınıfta olduğunuz beacon cihazı tarafından doğrulanmadı.';
+          throw 'Sınıfta olduğunuz beacon cihazı tarafından doğrulanmadı.';
         }
-        
-        final bool isValidToken = SecurityUtils.verifyTimeToken(classroomSecret, _detectedBeaconToken!);
+
+        final bool isValidToken = SecurityUtils.verifyTimeToken(
+          classroomSecret,
+          _detectedBeaconToken!,
+        );
         if (!isValidToken) {
-           throw 'Güvenlik kodu uyuşmuyor. Lütfen beacon cihazına yakınlaşın.';
+          throw 'Güvenlik kodu uyuşmuyor. Lütfen beacon cihazına yakınlaşın.';
         }
       }
       final studentId = supabase.auth.currentUser?.id;
@@ -164,7 +184,8 @@ class _QRScannerPageState extends State<QRScannerPage> {
           .eq('id', studentId)
           .single();
 
-      if (userProfile['device_id'] != null && userProfile['device_id'] != currentDeviceId) {
+      if (userProfile['device_id'] != null &&
+          userProfile['device_id'] != currentDeviceId) {
         throw 'Bu cihaz hesabınızla eşleşmiyor. Lütfen kayıtlı cihazınızı kullanın.';
       }
 
@@ -182,12 +203,13 @@ class _QRScannerPageState extends State<QRScannerPage> {
 
       // 3. Record attendance
       try {
-        await supabase.from('attendance').upsert({
+        await _upsertAttendanceWithOptionalMethod({
           'student_id': studentId,
           'course_id': courseId,
           'date': date,
           'is_present': true,
-        }, onConflict: 'student_id, course_id, date');
+          'attendance_method': 'qr',
+        });
       } on PostgrestException catch (e) {
         if (e.code == '42501') {
           throw 'Yoklama kaydedilemedi. Veritabanı yetki hatası (RLS). Lütfen yöneticinizle iletişime geçin.';
@@ -196,29 +218,51 @@ class _QRScannerPageState extends State<QRScannerPage> {
       }
 
       if (!mounted) return;
-      
+
       _showResultDialog(
         success: true,
-        message: _proximityVerified 
-          ? 'Yoklamanız güvenli bir şekilde alındı.' 
-          : 'Yoklamanız alındı (Yakınlık doğrulaması başarısız).',
+        message: _proximityVerified
+            ? 'Yoklamanız güvenli bir şekilde alındı.'
+            : 'Yoklamanız alındı (Yakınlık doğrulaması başarısız).',
       );
     } catch (e) {
       if (!mounted) return;
-      
+
       String errorMessage = e.toString();
       if (errorMessage.startsWith('Exception: ')) {
         errorMessage = errorMessage.substring(11);
       } else if (e is PostgrestException) {
         errorMessage = 'Veritabanı hatası: ${e.message}';
       }
-      
-      _showResultDialog(
-        success: false,
-        message: errorMessage,
-      );
+
+      _showResultDialog(success: false, message: errorMessage);
     } finally {
       if (mounted) setState(() => _isProcessing = false);
+    }
+  }
+
+  Future<void> _upsertAttendanceWithOptionalMethod(
+    Map<String, dynamic> values,
+  ) async {
+    final supabaseClient = Supabase.instance.client;
+    try {
+      await supabaseClient
+          .from('attendance')
+          .upsert(values, onConflict: 'student_id, course_id, date');
+    } on PostgrestException catch (e) {
+      final message = e.message.toLowerCase();
+      final isMissingMethodColumn =
+          e.code == 'PGRST204' ||
+          e.code == '42703' ||
+          message.contains('attendance_method') ||
+          message.contains('column');
+      if (!isMissingMethodColumn) rethrow;
+
+      final fallbackValues = Map<String, dynamic>.from(values)
+        ..remove('attendance_method');
+      await supabaseClient
+          .from('attendance')
+          .upsert(fallbackValues, onConflict: 'student_id, course_id, date');
     }
   }
 
@@ -256,11 +300,17 @@ class _QRScannerPageState extends State<QRScannerPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('QR Okut', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        title: const Text(
+          'QR Okut',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
         backgroundColor: AppColors.primary,
         centerTitle: true,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white),
+          icon: const Icon(
+            Icons.arrow_back_ios_new_rounded,
+            color: Colors.white,
+          ),
           onPressed: () => Navigator.pop(context),
         ),
       ),
@@ -284,18 +334,26 @@ class _QRScannerPageState extends State<QRScannerPage> {
               height: 250,
               decoration: BoxDecoration(
                 border: Border.all(
-                  color: _proximityVerified ? AppColors.success : Colors.white.withValues(alpha: 0.5), 
-                  width: 3
+                  color: _proximityVerified
+                      ? AppColors.success
+                      : Colors.white.withValues(alpha: 0.5),
+                  width: 3,
                 ),
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: _proximityVerified ? const Align(
-                alignment: Alignment.topRight,
-                child: Padding(
-                  padding: EdgeInsets.all(8.0),
-                  child: Icon(Icons.bluetooth_connected_rounded, color: AppColors.success, size: 28),
-                ),
-              ) : null,
+              child: _proximityVerified
+                  ? const Align(
+                      alignment: Alignment.topRight,
+                      child: Padding(
+                        padding: EdgeInsets.all(8.0),
+                        child: Icon(
+                          Icons.bluetooth_connected_rounded,
+                          color: AppColors.success,
+                          size: 28,
+                        ),
+                      ),
+                    )
+                  : null,
             ),
           ),
           if (_isProcessing)

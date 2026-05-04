@@ -17,8 +17,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/utils/theme/colors/app_colors.dart';
 
 // Term dates - Should ideally come from a config or DB, but using constants for now as in CourseStudentsPage
-final DateTime TERM_START = DateTime(2026, 2, 9);
-final DateTime TERM_END = DateTime(2026, 6, 12);
+final DateTime termStart = DateTime(2026, 2, 9);
+final DateTime termEnd = DateTime(2026, 6, 12);
 
 class TeacherAnalyticsPage extends StatefulWidget {
   final Map<String, dynamic> course;
@@ -95,8 +95,8 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
     
     List<DateTime> allScheduledDates = [];
     for (
-      DateTime d = TERM_START;
-      d.isBefore(TERM_END) || DateUtils.isSameDay(d, TERM_END);
+      DateTime d = termStart;
+      d.isBefore(termEnd) || DateUtils.isSameDay(d, termEnd);
       d = d.add(const Duration(days: 1))
     ) {
       final dayEnglish = DateFormat('EEEE').format(d).toLowerCase();
@@ -221,7 +221,12 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
       final file = await File('${tempDir.path}/$fileName').create();
       await file.writeAsBytes(fileBytes);
       
-      await Share.shareXFiles([XFile(file.path)], text: 'Yoklama Raporu');
+      if (context.mounted) {
+        await Share.shareXFiles(
+          [XFile(file.path)],
+          subject: 'Yoklama Raporu',
+        );
+      }
     }
   }
 
@@ -284,7 +289,7 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: AppColors.primary.withOpacity(0.15),
+                          color: AppColors.primary.withValues(alpha: 0.15),
                           blurRadius: 10,
                           offset: const Offset(0, 5),
                         ),
@@ -295,7 +300,7 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
                         Container(
                           padding: const EdgeInsets.all(16),
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.15),
+                            color: Colors.white.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(16),
                           ),
                           child: Column(
@@ -545,9 +550,9 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 20, offset: const Offset(0, 10)),
+          BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 20, offset: const Offset(0, 10)),
         ],
-        border: Border.all(color: AppColors.border.withOpacity(0.5)),
+        border: Border.all(color: AppColors.border.withAlpha(5*25)),
       ),
       child: HeatMap(
         datasets: _heatmapData,
@@ -594,16 +599,16 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 20, offset: const Offset(0, 10)),
+          BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 20, offset: const Offset(0, 10)),
         ],
-        border: Border.all(color: AppColors.border.withOpacity(0.5)),
+        border: Border.all(color: AppColors.border.withAlpha(5*25)),
       ),
       child: LineChart(
         LineChartData(
           gridData: FlGridData(
             show: true,
             drawVerticalLine: false,
-            getDrawingHorizontalLine: (value) => FlLine(color: Colors.grey.withOpacity(0.1), strokeWidth: 1),
+            getDrawingHorizontalLine: (value) => FlLine(color: Colors.grey.withAlpha(1*25), strokeWidth: 1),
           ),
           titlesData: FlTitlesData(
             rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
@@ -658,7 +663,7 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  colors: [AppColors.primary.withOpacity(0.2), AppColors.primary.withOpacity(0.01)],
+                  colors: [AppColors.primary.withAlpha(2*25), AppColors.primary.withValues(alpha: 0.01)],
                 ),
               ),
             ),
@@ -697,15 +702,15 @@ class _StatCard extends StatelessWidget {
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
-          BoxShadow(color: color.withOpacity(0.12), blurRadius: 20, offset: const Offset(0, 10)),
+          BoxShadow(color: color.withValues(alpha: 0.12), blurRadius: 20, offset: const Offset(0, 10)),
         ],
-        border: Border.all(color: color.withOpacity(0.1)),
+        border: Border.all(color: color.withAlpha(1*25)),
       ),
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(16)),
+            decoration: BoxDecoration(color: color.withAlpha(1*25), borderRadius: BorderRadius.circular(16)),
             child: Icon(icon, color: color, size: 24),
           ),
           const SizedBox(width: 16),
@@ -758,7 +763,7 @@ class _ExportTile extends StatelessWidget {
           children: [
             Container(
               padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+              decoration: BoxDecoration(color: color.withAlpha(1*25), borderRadius: BorderRadius.circular(12)),
               child: Icon(icon, color: color, size: 24),
             ),
             const SizedBox(width: 16),

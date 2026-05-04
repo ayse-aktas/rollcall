@@ -125,8 +125,9 @@ class _LoginPageState extends State<LoginPage>
   }
 
   String _translateAuthError(String message) {
-    if (message.contains('Invalid login credentials'))
+    if (message.contains('Invalid login credentials')) {
       return 'E-posta veya şifre hatalı.';
+    }
     return 'Giriş yapılamadı. Lütfen tekrar deneyin.';
   }
 

@@ -8,10 +8,12 @@ import 'dart:async';
 import 'package:beacon_broadcast/beacon_broadcast.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../../core/utils/security_utils.dart';
+import '../../../core/services/person_detector_service.dart';
+import 'verification_camera_page.dart';
 
 // ACADEMIC TERM DATES
-final DateTime TERM_START = DateTime(2026, 2, 9);
-final DateTime TERM_END = DateTime(2026, 6, 12);
+final DateTime termStart = DateTime(2026, 2, 9);
+final DateTime termEnd = DateTime(2026, 6, 12);
 
 int getScheduledDaysCount(DateTime start, DateTime end, String courseDayRaw) {
   final List<String> scheduledDays = courseDayRaw
@@ -100,9 +102,9 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
   Map<String, dynamic>? _course;
   List<Map<String, dynamic>> _students = [];
   Map<String, bool> _attendanceMap = {};
-  DateTime _selectedDate = DateTime.now().isBefore(TERM_START)
-      ? TERM_START
-      : (DateTime.now().isAfter(TERM_END) ? TERM_END : DateTime.now());
+  DateTime _selectedDate = DateTime.now().isBefore(termStart)
+      ? termStart
+      : (DateTime.now().isAfter(termEnd) ? termEnd : DateTime.now());
 
   RealtimeChannel? _realtimeChannel;
 
@@ -246,13 +248,15 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
       }
     });
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Otomatik yoklama başlatıldı! Öğrenciler taranıyor...'),
-        backgroundColor: AppColors.primary,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Otomatik yoklama başlatıldı! Öğrenciler taranıyor...'),
+          backgroundColor: AppColors.primary,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   Future<void> _stopAutomaticAttendance() async {
@@ -382,7 +386,7 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
     final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
     showDialog(
       context: context,
-      builder: (context) => _QRDisplayDialog(
+      builder: (ctx) => _QRDisplayDialog(
         courseId: _course!['id'],
         courseName: _translateCourseName(_course?['course_name']),
         dateStr: dateStr,
@@ -620,6 +624,7 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
         ],
       ),
       floatingActionButton: _canOpenQR() ? _buildFABs() : null,
+      bottomNavigationBar: _buildVerifyBar(),
     );
   }
 
@@ -666,7 +671,6 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
               fontWeight: FontWeight.bold,
             ),
           ),
-
           const Spacer(),
           const Text(
             'Sıralama: Okul No',
@@ -674,6 +678,371 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
           ),
         ],
       ),
+    );
+  }
+
+  // ── Doğrulama Barı ──────────────────────────────────────
+  Widget? _buildVerifyBar() {
+    final presentCount = _attendanceMap.values.where((v) => v).length;
+    if (presentCount == 0 || _isLoading) return null;
+    if (!DateUtils.isSameDay(_selectedDate, DateTime.now())) return null;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        border: const Border(top: BorderSide(color: AppColors.border)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          width: double.infinity,
+          height: 50,
+          child: ElevatedButton.icon(
+            onPressed: _verifyAttendance,
+            icon: const Icon(Icons.verified_user_rounded, size: 20),
+            label: const Text(
+              'Kamera ile Doğrula',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF6C63FF),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              elevation: 0,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Doğrulama Mantığı ──────────────────────────────────
+  Future<void> _verifyAttendance() async {
+    final result = await Navigator.push<PersonDetectionResult>(
+      context,
+      MaterialPageRoute(builder: (_) => const VerificationCameraPage()),
+    );
+
+    if (result == null || !mounted) return;
+
+    final bleCount = _attendanceMap.values.where((v) => v).length;
+    final cameraCount = result.personCount;
+
+    // Supabase'e doğrulama logunu kaydet
+    try {
+      await _supabase.from('verification_logs').insert({
+        'course_id': _course!['id'],
+        'teacher_id': _supabase.auth.currentUser?.id,
+        'date': DateFormat('yyyy-MM-dd').format(_selectedDate),
+        'ble_device_count': bleCount,
+        'camera_person_count': cameraCount,
+        'verification_status': bleCount > cameraCount
+            ? 'device_excess'
+            : (cameraCount > bleCount ? 'person_excess' : 'verified'),
+        'confidence_avg': result.averageConfidence,
+      });
+    } catch (e) {
+      debugPrint('Verification log kayıt hatası: $e');
+    }
+
+    if (!mounted) return;
+
+    // Sonuca göre dialog göster
+    if (bleCount > cameraCount) {
+      _showDeviceExcessDialog(bleCount, cameraCount);
+    } else if (cameraCount > bleCount) {
+      _showPersonExcessDialog(bleCount, cameraCount);
+    } else {
+      _showVerifiedDialog(bleCount, cameraCount);
+    }
+  }
+
+  // ⚠️ Cihaz sayısı > Kişi sayısı
+  void _showDeviceExcessDialog(int bleCount, int cameraCount) {
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 64, height: 64,
+                decoration: BoxDecoration(
+                  color: AppColors.error.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.warning_amber_rounded,
+                    color: AppColors.error, size: 32),
+              ),
+              const SizedBox(height: 16),
+              const Text('Uyumsuzluk Tespit Edildi!',
+                  style: TextStyle(
+                    fontSize: 18, fontWeight: FontWeight.bold,
+                    color: AppColors.textPrimary)),
+              const SizedBox(height: 8),
+              Text(
+                'Kişi sayısı eksik, cihaz sayısı fazla!',
+                style: TextStyle(
+                  color: AppColors.error, fontWeight: FontWeight.w600,
+                  fontSize: 14),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              _buildCountComparison(bleCount, cameraCount),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.errorBg,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.info_outline, color: AppColors.error, size: 18),
+                    SizedBox(width: 8),
+                    Expanded(child: Text(
+                      'Sınıfta olmayan öğrenciler BLE ile yoklamaya giriş yapmış olabilir.',
+                      style: TextStyle(color: AppColors.errorText, fontSize: 12),
+                    )),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  child: const Text('Tamam',
+                      style: TextStyle(color: Colors.white,
+                          fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ℹ️ Kişi sayısı > Cihaz sayısı
+  void _showPersonExcessDialog(int bleCount, int cameraCount) {
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 64, height: 64,
+                decoration: BoxDecoration(
+                  color: AppColors.warning.withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.phone_disabled_rounded,
+                    color: Color(0xFFE67E22), size: 32),
+              ),
+              const SizedBox(height: 16),
+              const Text('Eksik Cihaz Tespit Edildi',
+                  style: TextStyle(
+                    fontSize: 18, fontWeight: FontWeight.bold,
+                    color: AppColors.textPrimary)),
+              const SizedBox(height: 8),
+              const Text(
+                'Telefonunda sorun olan öğrenci var mı?',
+                style: TextStyle(
+                  color: Color(0xFFE67E22), fontWeight: FontWeight.w600,
+                  fontSize: 14),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              _buildCountComparison(bleCount, cameraCount),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF8E1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.lightbulb_outline, color: Color(0xFFE67E22), size: 18),
+                    SizedBox(width: 8),
+                    Expanded(child: Text(
+                      'Telefonunda sorun olan öğrenciler QR kod ile giriş yapabilir.',
+                      style: TextStyle(color: Color(0xFFE67E22), fontSize: 12),
+                    )),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      style: OutlinedButton.styleFrom(
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      child: const Text('Kapat'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _showQRCode();
+                      },
+                      icon: const Icon(Icons.qr_code_2_rounded, size: 18),
+                      label: const Text('QR Aç'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ✅ Eşleşme başarılı
+  void _showVerifiedDialog(int bleCount, int cameraCount) {
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 64, height: 64,
+                decoration: BoxDecoration(
+                  color: AppColors.success.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.check_circle_rounded,
+                    color: AppColors.success, size: 36),
+              ),
+              const SizedBox(height: 16),
+              const Text('Yoklama Doğrulandı!',
+                  style: TextStyle(
+                    fontSize: 18, fontWeight: FontWeight.bold,
+                    color: AppColors.textPrimary)),
+              const SizedBox(height: 8),
+              Text(
+                'Kamera ve BLE sonuçları eşleşiyor',
+                style: TextStyle(
+                  color: AppColors.success, fontWeight: FontWeight.w600,
+                  fontSize: 14),
+              ),
+              const SizedBox(height: 16),
+              _buildCountComparison(bleCount, cameraCount),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.success,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  child: const Text('Harika!',
+                      style: TextStyle(color: Colors.white,
+                          fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCountComparison(int bleCount, int cameraCount) {
+    return Row(
+      children: [
+        Expanded(
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceLight,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              children: [
+                const Icon(Icons.bluetooth_rounded, color: AppColors.primary, size: 24),
+                const SizedBox(height: 6),
+                Text('$bleCount', style: const TextStyle(
+                  fontSize: 24, fontWeight: FontWeight.bold,
+                  color: AppColors.primary)),
+                const Text('BLE Cihaz', style: TextStyle(
+                  color: AppColors.textSecondary, fontSize: 11)),
+              ],
+            ),
+          ),
+        ),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 8),
+          child: Icon(Icons.compare_arrows_rounded,
+              color: AppColors.textSecondary, size: 24),
+        ),
+        Expanded(
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceLight,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              children: [
+                const Icon(Icons.camera_alt_rounded, color: Color(0xFF6C63FF), size: 24),
+                const SizedBox(height: 6),
+                Text('$cameraCount', style: const TextStyle(
+                  fontSize: 24, fontWeight: FontWeight.bold,
+                  color: Color(0xFF6C63FF))),
+                const Text('Kamera Kişi', style: TextStyle(
+                  color: AppColors.textSecondary, fontSize: 11)),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -912,10 +1281,11 @@ class _QRDisplayDialogState extends State<_QRDisplayDialog> {
 
   void _startTimer() {
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (_secondsLeft > 0)
+      if (_secondsLeft > 0) {
         setState(() => _secondsLeft--);
-      else
+      } else {
         _generateData();
+      }
     });
   }
 
@@ -1125,10 +1495,10 @@ class _CustomCalendarDialogState extends State<_CustomCalendarDialog> {
                   day,
                 );
                 final bool inTerm =
-                    (date.isAfter(TERM_START) ||
-                        DateUtils.isSameDay(date, TERM_START)) &&
-                    (date.isBefore(TERM_END) ||
-                        DateUtils.isSameDay(date, TERM_END));
+                    (date.isAfter(termStart) ||
+                        DateUtils.isSameDay(date, termStart)) &&
+                    (date.isBefore(termEnd) ||
+                        DateUtils.isSameDay(date, termEnd));
                 final bool isSched = inTerm && widget.isScheduledDay(date);
                 final bool isSelected = DateUtils.isSameDay(
                   date,
