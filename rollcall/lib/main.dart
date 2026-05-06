@@ -12,6 +12,9 @@ import 'view/teacher/pages/course_students_page.dart';
 import 'view/teacher/pages/teacher_analytics_page.dart';
 import 'view/admin/admin_page.dart';
 import 'view/splash/splash_page.dart';
+import 'view/login/forgot_password_page.dart';
+import 'view/login/reset_password_page.dart';
+
 import 'core/utils/logger.dart';
 
 
@@ -68,6 +71,8 @@ class MyApp extends StatelessWidget {
       routes: {
         '/': (context) => const SplashPage(),
         '/login': (context) => const LoginPage(),
+        '/forgot-password': (context) => const ForgotPasswordPage(),
+        '/reset-password': (context) => const ResetPasswordPage(),
         '/ogrenci-anasayfa': (context) => const StudentHomePage(),
         '/ogretmen-anasayfa': (context) => const TeacherHomePage(),
         '/ogretmen-ders-detay': (context) => const CourseStudentsPage(),
@@ -77,6 +82,7 @@ class MyApp extends StatelessWidget {
         },
         '/admin-panel': (context) => const AdminPage(),
       },
+
     );
   }
 }

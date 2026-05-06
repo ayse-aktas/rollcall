@@ -52,42 +52,48 @@ class _LoginPageState extends State<LoginPage>
     });
 
     try {
-      final input = _emailController.text.trim();
+      final schoolNo = _emailController.text.trim();
       final password = _passwordController.text;
 
-      // Auto-append domain if only ID is entered
-      String email = input;
-      if (!input.contains('@')) {
-        if (_loginType == LoginType.student) {
-          email = '$input@ogr.sakarya.edu.tr';
-        } else {
-          email = '$input@sakarya.edu.tr';
-        }
+      // 1. Okul numarasından e-postayı ve rolü çekiyoruz
+      final userData = await Supabase.instance.client
+          .from('users')
+          .select('email, role, device_id')
+          .eq('school_no', schoolNo)
+          .maybeSingle();
+
+      if (userData == null) {
+        setState(() => _errorMessage = 'Bu okul numarasına ait bir kullanıcı bulunamadı.');
+        return;
       }
 
+      final email = userData['email'] as String;
+      final role = userData['role'] as String;
+      final registeredDeviceId = userData['device_id'] as String?;
+
+      // 2. Rol (Sekme) Kontrolü
+      if (_loginType == LoginType.student && role != 'student') {
+        setState(() => _errorMessage = 'Bu hesap bir öğrenci hesabı değildir.\nLütfen Akademisyen sekmesini deneyin.');
+        return;
+      }
+      if (_loginType == LoginType.teacher && role != 'teacher') {
+        setState(() => _errorMessage = 'Bu hesap bir akademisyen hesabı değildir.\nLütfen Öğrenci sekmesini deneyin.');
+        return;
+      }
+
+      // 3. Giriş Yap
       final response = await Supabase.instance.client.auth.signInWithPassword(
         email: email,
         password: password,
       );
 
       if (response.user == null) {
-        setState(
-          () => _errorMessage = 'Giriş başarısız. Bilgilerinizi kontrol edin.',
-        );
+        setState(() => _errorMessage = 'Şifre hatalı. Lütfen kontrol edin.');
         return;
       }
 
-      // Fetch profile and check device binding
+      // 4. Cihaz eşleştirme (Sadece öğrenciler için)
       final currentDeviceId = await SecurityUtils.getUniqueDeviceId();
-      final profile = await Supabase.instance.client
-          .from('users')
-          .select('role, device_id')
-          .eq('id', response.user!.id)
-          .single();
-
-      final role = profile['role'] as String;
-      final registeredDeviceId = profile['device_id'] as String?;
-
       if (role == 'student') {
         if (registeredDeviceId == null || registeredDeviceId.isEmpty) {
           // First time login - Bind the device
@@ -118,7 +124,7 @@ class _LoginPageState extends State<LoginPage>
         Navigator.pushReplacementNamed(context, '/admin-panel');
       }
     } on AuthException catch (e) {
-      setState(() => _errorMessage = _translateAuthError(e.message));
+      setState(() => _errorMessage = 'Giriş başarısız: ${_translateAuthError(e.message)}');
     } catch (e) {
       debugPrint('Login Error: $e');
       setState(() => _errorMessage = 'Giriş işlemi sırasında bir hata oluştu.');
@@ -126,6 +132,7 @@ class _LoginPageState extends State<LoginPage>
       if (mounted) setState(() => _isLoading = false);
     }
   }
+
 
   String _translateAuthError(String message) {
     if (message.contains('Invalid login credentials')) {
@@ -291,11 +298,34 @@ class _LoginPageState extends State<LoginPage>
             if (_errorMessage != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 16),
-                child: Text(
-                  _errorMessage!,
-                  style: const TextStyle(color: Colors.red, fontSize: 13),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _errorMessage!,
+                      style: const TextStyle(color: Colors.red, fontSize: 13, height: 1.4),
+                    ),
+                    if (_errorMessage!.contains('Şifre hatalı'))
+                      TextButton(
+                        onPressed: () => Navigator.pushNamed(context, '/forgot-password'),
+                        style: TextButton.styleFrom(
+                          padding: EdgeInsets.zero,
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        child: const Text(
+                          'Şifrenizi mi unuttunuz?',
+                          style: TextStyle(
+                            color: Color(0xFF1E60D2),
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
+
             _buildSignInButton(),
             const SizedBox(height: 32),
             Center(
