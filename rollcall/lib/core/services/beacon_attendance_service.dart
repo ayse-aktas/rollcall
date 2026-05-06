@@ -6,7 +6,9 @@ import 'package:flutter_beacon/flutter_beacon.dart' hide BeaconBroadcast;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:beacon_broadcast/beacon_broadcast.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:flutter/foundation.dart';
+import '../utils/logger.dart';
+
+
 
 class BeaconAttendanceService {
   static final BeaconAttendanceService _instance =
@@ -56,7 +58,8 @@ class BeaconAttendanceService {
     if (_isContinuousBroadcasting) return;
 
     try {
-      debugPrint('📱 Bluetooth izinleri isteniyor...');
+      AppLogger.i('📱 Bluetooth izinleri isteniyor...');
+
 
       final advertiseStatus = await Permission.bluetoothAdvertise.request();
       final scanStatus = await Permission.bluetoothScan.request();
@@ -66,21 +69,25 @@ class BeaconAttendanceService {
       // but note that scanning still requires location on most Android versions.
       // final locationStatus = await Permission.locationWhenInUse.request();
 
-      debugPrint('📱 Advertise izni: $advertiseStatus');
-      debugPrint('📱 Scan izni: $scanStatus');
-      debugPrint('📱 Connect izni: $connectStatus');
-      // debugPrint('📱 Location izni: $locationStatus');
+      AppLogger.d('📱 Advertise izni: $advertiseStatus');
+      AppLogger.d('📱 Scan izni: $scanStatus');
+      AppLogger.d('📱 Connect izni: $connectStatus');
+      // AppLogger.d('📱 Location izni: $locationStatus');
+
 
       if (!advertiseStatus.isGranted) {
-        debugPrint('⚠️ BLUETOOTH_ADVERTISE izni verilmedi! Yayın yapılamaz.');
+        AppLogger.w('⚠️ BLUETOOTH_ADVERTISE izni verilmedi! Yayın yapılamaz.');
+
         return;
       }
 
       final isSupported = await _beaconBroadcast.checkTransmissionSupported();
-      debugPrint('📡 Beacon Transmit Desteği: $isSupported');
+      AppLogger.i('📡 Beacon Transmit Desteği: $isSupported');
+
 
       if (isSupported != BeaconStatus.supported) {
-        debugPrint('⚠️ Bu cihaz beacon yayını desteklemiyor: $isSupported');
+        AppLogger.w('⚠️ Bu cihaz beacon yayını desteklemiyor: $isSupported');
+
         return;
       }
 
@@ -88,9 +95,10 @@ class BeaconAttendanceService {
       final int hashMajor = hashResult['major']!;
       final int hashMinor = hashResult['minor']!;
 
-      debugPrint('🟢 Sürekli BLE Yayını Başlatılıyor');
-      debugPrint('   Okul No: $schoolNo');
-      debugPrint('   Hash Major: $hashMajor, Hash Minor: $hashMinor');
+      AppLogger.i('🟢 Sürekli BLE Yayını Başlatılıyor');
+      AppLogger.d('   Okul No: $schoolNo');
+      AppLogger.d('   Hash Major: $hashMajor, Hash Minor: $hashMinor');
+
 
       _beaconBroadcast
           .setUUID('E2C56DB5-DFFB-48D2-B060-D0F5A71096B1')
@@ -100,9 +108,11 @@ class BeaconAttendanceService {
           .start();
 
       _isContinuousBroadcasting = true;
-      debugPrint('🟢 BLE Yayını Aktif!');
+      AppLogger.i('🟢 BLE Yayını Aktif!');
+
     } catch (e) {
-      debugPrint('❌ BLE Yayın Hatası: $e');
+      AppLogger.e('❌ BLE Yayın Hatası: $e');
+
     }
   }
 
@@ -111,9 +121,11 @@ class BeaconAttendanceService {
     try {
       _beaconBroadcast.stop();
       _isContinuousBroadcasting = false;
-      debugPrint('🔴 Sürekli BLE Yayını Durduruldu');
+      AppLogger.i('🔴 Sürekli BLE Yayını Durduruldu');
+
     } catch (e) {
-      debugPrint('❌ BLE Durdurma Hatası: $e');
+      AppLogger.e('❌ BLE Durdurma Hatası: $e');
+
     }
   }
 
@@ -124,7 +136,8 @@ class BeaconAttendanceService {
           .onBroadcast(
             event: 'start_automation',
             callback: (payload) {
-              debugPrint('Automation Signal Received: $payload');
+              AppLogger.i('Automation Signal Received: $payload');
+
               _handleAutomationTrigger(studentId, payload);
             },
           )
@@ -147,7 +160,8 @@ class BeaconAttendanceService {
         await _verifyAndSubmit(studentId, courseId, expectedMajor, minor);
       });
     } catch (e) {
-      debugPrint('Automation Error: $e');
+      AppLogger.e('Automation Error: $e');
+
     } finally {
       Future.delayed(const Duration(seconds: 45), () {
         _stopScanning();
@@ -215,7 +229,8 @@ class BeaconAttendanceService {
           _verifyToken(secret, timestamp - 1, minor);
 
       if (!isValid) {
-        debugPrint('Security Reject: Invalid Token');
+        AppLogger.w('Security Reject: Invalid Token');
+
         return;
       }
 
@@ -232,7 +247,8 @@ class BeaconAttendanceService {
       _startSelfIdentification(schoolNo);
       _showSuccessNotification(courseName);
     } catch (e) {
-      debugPrint('Verification Error: $e');
+      AppLogger.e('Verification Error: $e');
+
     }
   }
 
@@ -242,7 +258,8 @@ class BeaconAttendanceService {
     studentMinor = studentMinor % 65535;
     if (studentMinor == 0) studentMinor = 1;
 
-    debugPrint('Starting Self-Identification Beacon: Minor $studentMinor');
+    AppLogger.i('Starting Self-Identification Beacon: Minor $studentMinor');
+
 
     _beaconBroadcast
         .setUUID('E2C56DB5-DFFB-48D2-B060-D0F5A71096B1')
@@ -253,7 +270,8 @@ class BeaconAttendanceService {
 
     Future.delayed(const Duration(seconds: 30), () {
       _beaconBroadcast.stop();
-      debugPrint('Self-Identification Beacon Stopped');
+      AppLogger.i('Self-Identification Beacon Stopped');
+
     });
   }
 

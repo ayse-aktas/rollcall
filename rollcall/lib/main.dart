@@ -12,6 +12,8 @@ import 'view/teacher/pages/course_students_page.dart';
 import 'view/teacher/pages/teacher_analytics_page.dart';
 import 'view/admin/admin_page.dart';
 import 'view/splash/splash_page.dart';
+import 'core/utils/logger.dart';
+
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -31,6 +33,9 @@ void main() async {
   // Firebase ve Bildirimlerin Hazırlanması
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   await _setupNotifications();
+
+  AppLogger.i('🚀 Uygulama başlatıldı: Supabase ve Firebase hazır.');
+
 
   runApp(const MyApp());
 }

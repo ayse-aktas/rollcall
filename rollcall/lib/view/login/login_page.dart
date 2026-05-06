@@ -57,11 +57,16 @@ class _LoginPageState extends State<LoginPage>
       final input = _emailController.text.trim();
       final password = _passwordController.text;
 
-      // Auto-append domain for student if only number is entered
+      // Auto-append domain if only ID is entered
       String email = input;
-      if (_loginType == LoginType.student && !input.contains('@')) {
-        email = '$input@ogr.sakarya.edu.tr';
+      if (!input.contains('@')) {
+        if (_loginType == LoginType.student) {
+          email = '$input@ogr.sakarya.edu.tr';
+        } else {
+          email = '$input@sakarya.edu.tr';
+        }
       }
+
 
       final response = await Supabase.instance.client.auth.signInWithPassword(
         email: email,
@@ -137,20 +142,17 @@ class _LoginPageState extends State<LoginPage>
       backgroundColor: const Color(0xFFF8FAFF),
       body: AnnotatedRegion<SystemUiOverlayStyle>(
         value: SystemUiOverlayStyle.dark,
-        child: FadeTransition(
-          opacity: _fadeAnim,
-          child: SingleChildScrollView(
-            child: Column(
-              children: [
-                const SizedBox(height: 60),
-                _buildLogoHeader(),
-                const SizedBox(height: 30),
-                _buildLoginCard(),
-                const SizedBox(height: 40),
-                _buildFooterLinks(),
-                const SizedBox(height: 20),
-              ],
-            ),
+        child: SingleChildScrollView(
+          child: Column(
+            children: [
+              const SizedBox(height: 60),
+              _buildLogoHeader(),
+              const SizedBox(height: 30),
+              _buildLoginCard(),
+              const SizedBox(height: 40),
+              // Footer links removed as requested
+              const SizedBox(height: 20),
+            ],
           ),
         ),
       ),
@@ -237,7 +239,7 @@ class _LoginPageState extends State<LoginPage>
             _buildTypeToggle(),
             const SizedBox(height: 32),
             const Text(
-              'KURUMSAL E-POSTA',
+              'OKUL NUMARASI',
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
@@ -245,14 +247,19 @@ class _LoginPageState extends State<LoginPage>
                 letterSpacing: 0.5,
               ),
             ),
+
+
+
             const SizedBox(height: 12),
             _buildTextField(
               controller: _emailController,
               hint: _loginType == LoginType.student
-                  ? 'b221210036@ogr.sakarya.edu.tr'
-                  : 'ad.soyad@universite.edu.tr',
-              prefixIcon: Icons.email_outlined,
+                  ? 'G221210036'
+                  : 'S123456789',
+              prefixIcon: Icons.person_outline_rounded,
             ),
+
+
             const SizedBox(height: 24),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -344,8 +351,7 @@ class _LoginPageState extends State<LoginPage>
     final isSelected = _loginType == type;
     return GestureDetector(
       onTap: () => setState(() => _loginType = type),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
+      child: Container(
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: isSelected ? Colors.white : Colors.transparent,
@@ -360,6 +366,7 @@ class _LoginPageState extends State<LoginPage>
                 ]
               : null,
         ),
+
         child: Text(
           label,
           style: TextStyle(
@@ -405,8 +412,9 @@ class _LoginPageState extends State<LoginPage>
             ? IconButton(
                 icon: Icon(
                   _isPasswordHidden
-                      ? Icons.visibility_outlined
-                      : Icons.visibility_off_outlined,
+                      ? Icons.visibility_off_outlined
+                      : Icons.visibility_outlined,
+
                   color: const Color(0xFF6F767E),
                   size: 20,
                 ),
@@ -464,64 +472,5 @@ class _LoginPageState extends State<LoginPage>
       ),
     );
   }
-
-  Widget _buildFooterLinks() {
-    return Column(
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            _footerIcon(Icons.link),
-            const SizedBox(width: 20),
-            _footerIcon(Icons.language),
-            const SizedBox(width: 20),
-            _footerIcon(Icons.home_outlined),
-          ],
-        ),
-        const SizedBox(height: 40),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 40),
-          child: Column(
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  _footerText('© 2024 ROLLCALL SİSTEMLERİ.', width: 100),
-                  _footerText('GİZLİLİK POLİTİKASI'),
-                  _footerText('SİSTEM DURUMU'),
-                  _footerText('BEACON AĞI ÇEVRİMİÇİ'),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _footerIcon(IconData icon) {
-    return Container(
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: const Color(0xFFBCC1CD),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Icon(icon, color: Colors.white, size: 18),
-    );
-  }
-
-  Widget _footerText(String text, {double? width}) {
-    return SizedBox(
-      width: width ?? 60,
-      child: Text(
-        text,
-        style: const TextStyle(
-          fontSize: 9,
-          fontWeight: FontWeight.w700,
-          color: Color(0xFF6F767E),
-          height: 1.4,
-        ),
-      ),
-    );
-  }
 }
+
