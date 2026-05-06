@@ -120,12 +120,6 @@ class _QRScannerPageState extends State<QRScannerPage> {
 
       if (courseData['classrooms'] != null &&
           courseData['classrooms']['faculties'] != null) {
-        final faculty = courseData['classrooms']['faculties'];
-        final double targetLat = faculty['latitude'] ?? 0.0;
-        final double targetLng = faculty['longitude'] ?? 0.0;
-        final int radius = faculty['radius_meters'] ?? 100;
-
-        // Check GPS permissions
         LocationPermission permission = await Geolocator.checkPermission();
         if (permission == LocationPermission.denied) {
           permission = await Geolocator.requestPermission();
@@ -133,32 +127,9 @@ class _QRScannerPageState extends State<QRScannerPage> {
             throw 'Konum izni reddedildi.';
           }
         }
-
-        // Get current position
-        final Position position = await Geolocator.getCurrentPosition(
-          locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.high,
-          ),
-        );
-
-        // Calculate distance
-        final double distance = Geolocator.distanceBetween(
-          position.latitude,
-          position.longitude,
-          targetLat,
-          targetLng,
-        );
-
-        /*
-        if (distance > radius) {
-          throw 'Fakülte sınırları dışındasınız. Lütfen sınıfa girin. (Uzaklık: ${distance.toStringAsFixed(0)}m)';
-        }
-        */
-
         classroomSecret = courseData['classrooms']['beacon_secret'];
       }
 
-      // SECURE MODE VALIDATION (Updated to use classroom secret)
       if (isSecure && classroomSecret != null) {
         if (!_proximityVerified || _detectedBeaconToken == null) {
           throw 'Sınıfta olduğunuz beacon cihazı tarafından doğrulanmadı.';

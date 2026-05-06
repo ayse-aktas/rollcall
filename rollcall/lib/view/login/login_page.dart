@@ -24,7 +24,6 @@ class _LoginPageState extends State<LoginPage>
   String? _errorMessage;
 
   late AnimationController _animController;
-  late Animation<double> _fadeAnim;
 
   @override
   void initState() {
@@ -33,7 +32,6 @@ class _LoginPageState extends State<LoginPage>
       vsync: this,
       duration: const Duration(milliseconds: 800),
     );
-    _fadeAnim = CurvedAnimation(parent: _animController, curve: Curves.easeIn);
     _animController.forward();
   }
 
