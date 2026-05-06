@@ -67,7 +67,6 @@ class _LoginPageState extends State<LoginPage>
         }
       }
 
-
       final response = await Supabase.instance.client.auth.signInWithPassword(
         email: email,
         password: password,
@@ -103,7 +102,8 @@ class _LoginPageState extends State<LoginPage>
           await Supabase.instance.client.auth.signOut();
           if (!mounted) return;
           setState(() {
-            _errorMessage = 'Bu hesap başka bir cihaza kayıtlıdır.\nLütfen kendi cihazınızdan giriş yapın.';
+            _errorMessage =
+                'Bu hesap başka bir cihaza kayıtlıdır.\nLütfen kendi cihazınızdan giriş yapın.';
             _isLoading = false;
           });
           return;
@@ -248,8 +248,6 @@ class _LoginPageState extends State<LoginPage>
               ),
             ),
 
-
-
             const SizedBox(height: 12),
             _buildTextField(
               controller: _emailController,
@@ -258,7 +256,6 @@ class _LoginPageState extends State<LoginPage>
                   : 'S123456789',
               prefixIcon: Icons.person_outline_rounded,
             ),
-
 
             const SizedBox(height: 24),
             Row(
@@ -473,4 +470,3 @@ class _LoginPageState extends State<LoginPage>
     );
   }
 }
-
