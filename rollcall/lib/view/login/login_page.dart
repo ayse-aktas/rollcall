@@ -182,10 +182,10 @@ class _LoginPageState extends State<LoginPage>
                 ),
               ],
             ),
-            child: const Icon(
-              Icons.wifi_tethering_rounded,
-              color: Color(0xFF1E60D2),
-              size: 28,
+            child: Image.asset(
+              'assets/images/app_icon.png',
+              width: 28,
+              height: 28,
             ),
           ),
           const SizedBox(width: 12),
@@ -276,7 +276,7 @@ class _LoginPageState extends State<LoginPage>
                   ),
                 ),
                 TextButton(
-                  onPressed: () {},
+                  onPressed: () => Navigator.pushNamed(context, '/forgot-password'),
                   child: const Text(
                     'Şifremi Unuttum?',
                     style: TextStyle(
@@ -286,6 +286,7 @@ class _LoginPageState extends State<LoginPage>
                     ),
                   ),
                 ),
+
               ],
             ),
             _buildTextField(

@@ -70,10 +70,10 @@ class _SplashPageState extends State<SplashPage> {
                 color: Colors.white,
                 shape: BoxShape.circle,
               ),
-              child: const Icon(
-                Icons.wifi_tethering_rounded,
-                color: AppColors.primary,
-                size: 60,
+              child: Image.asset(
+                'assets/images/app_icon.png',
+                width: 60,
+                height: 60,
               ),
             ),
             const SizedBox(height: 24),
