@@ -203,15 +203,24 @@ class _StudentHomePageState extends State<StudentHomePage> {
     if (readIds.isEmpty) return;
 
     try {
-      await _supabase.from('notifications').delete().inFilter('id', readIds);
-      setState(() {
-        _notifications.removeWhere((n) => n['is_read'] == true);
-      });
+      // PERSIST to Supabase
+      final response = await _supabase.from('notifications').delete().inFilter('id', readIds).select();
+      
+      debugPrint('DEBUG: Deleted notifications from DB: ${response.length} items');
+
+      if (mounted) {
+        setState(() {
+          _notifications.removeWhere((n) => n['is_read'] == true);
+        });
+      }
     } catch (e) {
       debugPrint('ERROR in _deleteAllReadNotifications: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Okunan bildirimler silinemedi.')),
+          SnackBar(
+            content: Text('Hata: Bildirimler silinemedi. Yetki sorunu olabilir. Detail: $e'),
+            backgroundColor: AppColors.error,
+          ),
         );
       }
     }
@@ -219,15 +228,27 @@ class _StudentHomePageState extends State<StudentHomePage> {
 
   Future<void> _deleteNotification(String id) async {
     try {
-      await _supabase.from('notifications').delete().eq('id', id);
-      setState(() {
-        _notifications.removeWhere((n) => n['id'].toString() == id);
-      });
+      // Parse ID to int if it's numeric to avoid type mismatch in some DB schemas
+      dynamic targetId = id;
+      if (int.tryParse(id) != null) targetId = int.parse(id);
+
+      final response = await _supabase.from('notifications').delete().eq('id', targetId).select();
+      
+      debugPrint('DEBUG: Deleted notification $id from DB. Response: $response');
+
+      if (mounted) {
+        setState(() {
+          _notifications.removeWhere((n) => n['id'].toString() == id);
+        });
+      }
     } catch (e) {
       debugPrint('ERROR in _deleteNotification: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Bildirim silinemedi.')),
+          SnackBar(
+            content: Text('Bildirim silinemedi. Detail: $e'),
+            backgroundColor: AppColors.error,
+          ),
         );
       }
     }
@@ -614,7 +635,7 @@ class _NotificationSheetState extends State<_NotificationSheet> with SingleTicke
                   notifications: unread, 
                   onMarkRead: (id) async { 
                     await widget.onMarkRead(id); 
-                    if (mounted) setState(() {});
+                    if (mounted) setState(() {}); // Refresh sheet
                   }, 
                   isNew: true,
                 ),
@@ -623,7 +644,7 @@ class _NotificationSheetState extends State<_NotificationSheet> with SingleTicke
                   onMarkRead: (_) {}, 
                   onDelete: (id) async {
                     await widget.onDeleteNotification(id);
-                    if (mounted) setState(() {});
+                    if (mounted) setState(() {}); // Refresh sheet
                   },
                   isNew: false,
                 ),
@@ -858,9 +879,44 @@ class _CourseCardState extends State<_CourseCard> {
     }
   }
 
-  void _triggerRiskNotification() {
-    // This could be a local notification or just a UI flag.
-    // We already update the UI state, but we could also show a one-time message.
+  Future<void> _triggerRiskNotification() async {
+    final sb = Supabase.instance.client;
+    final courseName = widget.course['course_name'];
+    final userId = sb.auth.currentUser?.id;
+    if (userId == null) return;
+
+    String msg = '';
+    if (_isFailed) {
+      msg = '$courseName dersinden devamsızlıktan kaldınız!';
+    } else if (_isAtRisk && _remaining <= 1) {
+      if (_remaining == 0) {
+        msg = '$courseName dersinden devamsızlık hakkınız bitti, mevcut derslere katılım durumunda geçebilirsiniz.';
+      } else {
+        msg = '$courseName dersi için yalnızca 1 devamsızlık hakkınız kaldı! Çok dikkat edin.';
+      }
+    } else {
+      return;
+    }
+
+    try {
+      // For "Failed" message, check if it was EVER sent before for this course
+      // For "At Risk" message, we can allow it once per day or once per state change
+      final existing = await sb
+          .from('notifications')
+          .select()
+          .eq('student_id', userId)
+          .eq('message', msg);
+
+      if (existing.isEmpty) {
+        await sb.from('notifications').insert({
+          'student_id': userId,
+          'message': msg,
+          'is_read': false,
+        });
+      }
+    } catch (e) {
+      debugPrint('Risk bildirimi gönderilemedi: $e');
+    }
   }
 
   @override
