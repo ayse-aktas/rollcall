@@ -296,6 +296,19 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
   }
 
   Future<void> _toggleAttendance(String studentId, bool? currentVal) async {
+    final isToday = DateUtils.isSameDay(_selectedDate, DateTime.now());
+    if (!isToday) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Geçmiş veya gelecek tarihli yoklamalar değiştirilemez.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
+
     final newVal = !(currentVal ?? false);
     final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
     final courseId = _course!['id'];
@@ -682,6 +695,28 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                   )
                 : Column(
                     children: [
+                      if (!DateUtils.isSameDay(_selectedDate, DateTime.now()))
+                        Container(
+                          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                          margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.orange.withValues(alpha: 0.2)),
+                          ),
+                          child: const Row(
+                            children: [
+                              Icon(Icons.info_outline_rounded, color: Colors.orange, size: 16),
+                              SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Sadece görüntüleme modundasınız. Geçmiş/gelecek yoklamalar değiştirilemez.',
+                                  style: TextStyle(color: Colors.orange, fontSize: 11, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       _buildHeaderStats(),
                       Expanded(
                         child: ListView.builder(
@@ -1627,7 +1662,7 @@ class _CustomCalendarDialogState extends State<_CustomCalendarDialog> {
                   _selectedDate,
                 );
                 return InkWell(
-                  onTap: isSched
+                  onTap: isSched && (date.isBefore(DateTime.now()) || DateUtils.isSameDay(date, DateTime.now()))
                       ? () => setState(() => _selectedDate = date)
                       : null,
                   child: Column(

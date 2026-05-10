@@ -375,11 +375,12 @@ class _StudentHomePageState extends State<StudentHomePage> {
               ),
             ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          Navigator.push(
+        onPressed: () async {
+          await Navigator.push(
             context,
             MaterialPageRoute(builder: (context) => const QRScannerPage()),
           );
+          _loadData();
         },
         backgroundColor: AppColors.primary,
         icon: const Icon(Icons.qr_code_scanner_rounded, color: Colors.white),
@@ -758,6 +759,9 @@ class _CourseCard extends StatefulWidget {
 class _CourseCardState extends State<_CourseCard> {
   int _total = 0, _attended = 0, _missed = 0;
   double _rate = 0;
+  bool _isAtRisk = false;
+  bool _isFailed = false;
+  int _remaining = 0;
 
   @override
   void initState() {
@@ -832,15 +836,31 @@ class _CourseCardState extends State<_CourseCard> {
     }
 
     if (!mounted) return;
-    
+
+    final occurred = attendedSessions + missedSessions;
+    final remaining = semesterTotal - occurred;
+    final double devamSiniri = 0.7;
+    final gerekenMinimumKatilim = (semesterTotal * devamSiniri).ceil();
+    final olasiMaksimumKatilim = attendedSessions + remaining;
+
     setState(() {
       _total = semesterTotal;
       _attended = attendedSessions;
       _missed = missedSessions;
-      // Rate is sessions attended out of sessions that have occurred so far
-      final occurred = _attended + _missed;
+      _remaining = remaining;
       _rate = occurred > 0 ? (_attended / occurred) * 100 : 100;
+      _isFailed = olasiMaksimumKatilim < gerekenMinimumKatilim;
+      _isAtRisk = !_isFailed && (olasiMaksimumKatilim == gerekenMinimumKatilim && remaining > 0);
     });
+
+    if (_isAtRisk || _isFailed) {
+      _triggerRiskNotification();
+    }
+  }
+
+  void _triggerRiskNotification() {
+    // This could be a local notification or just a UI flag.
+    // We already update the UI state, but we could also show a one-time message.
   }
 
   @override
@@ -861,8 +881,8 @@ class _CourseCardState extends State<_CourseCard> {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          onTap: () {
-            Navigator.push(
+          onTap: () async {
+            await Navigator.push(
               context,
               MaterialPageRoute(
                 builder: (context) => CourseAttendanceDetailPage(
@@ -871,6 +891,7 @@ class _CourseCardState extends State<_CourseCard> {
                 ),
               ),
             );
+            _loadStats();
           },
           borderRadius: BorderRadius.circular(20),
           child: Column(
@@ -930,9 +951,80 @@ class _CourseCardState extends State<_CourseCard> {
                         ),
                       ),
                     ),
+                    if (DateTime.now().isAfter(termEnd.subtract(const Duration(days: 14))))
+                      Container(
+                        margin: const EdgeInsets.only(left: 8),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: _isFailed ? AppColors.error : AppColors.success,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          _isFailed ? 'KALDI' : 'GEÇTİ',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),
+              if (_isFailed || _isAtRisk)
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 20),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: _isFailed
+                        ? AppColors.error.withValues(alpha: 0.1)
+                        : Colors.orange.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: _isFailed
+                          ? AppColors.error.withValues(alpha: 0.2)
+                          : Colors.orange.withValues(alpha: 0.2),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _isFailed ? Icons.error_outline_rounded : Icons.warning_amber_rounded,
+                        color: _isFailed ? AppColors.error : Colors.orange,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          _isFailed
+                              ? 'Devamsızlıktan kaldınız! (%70 barajı aşıldı)'
+                              : 'Dikkat! Kalan $_remaining dersin tamamına katılmanız gerekiyor.',
+                          style: TextStyle(
+                            color: _isFailed ? AppColors.error : Colors.orange[800],
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              if (_isFailed || _isAtRisk)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: _rate / 100,
+                      backgroundColor: (_isFailed ? AppColors.error : Colors.orange).withValues(alpha: 0.1),
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        _isFailed ? AppColors.error : Colors.orange,
+                      ),
+                      minHeight: 6,
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 12),
               Container(
                 height: 1,
                 color: AppColors.border.withValues(alpha: 0.6),
