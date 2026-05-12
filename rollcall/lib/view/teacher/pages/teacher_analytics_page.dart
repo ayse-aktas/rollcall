@@ -40,6 +40,10 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
   double _averageAttendanceRate = 0;
   List<Map<String, dynamic>> _allAttendanceRecords = [];
   
+  List<Map<String, dynamic>> _students = [];
+  List<DateTime> _allScheduledDates = [];
+  Set<String> _selectedStudentIds = {};
+
   // Stats
   int _totalLectures = 0;
   int _lecturesHeld = 0;
@@ -62,24 +66,46 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
         .map((e) => e.trim())
         .toList();
 
-    // 1. Fetch total student count for this course
-    final studentCountRes = await _supabase
+    // 1. Fetch all students registered to this course
+    final studentsRes = await _supabase
         .from('student_courses')
-        .select('student_id')
+        .select('student_id, users(id, first_name, last_name, school_no)')
         .eq('course_id', courseId);
     
-    _totalStudents = studentCountRes.length;
+    _students = List<Map<String, dynamic>>.from(studentsRes);
+    _students.sort((a, b) {
+      final noA = (a['users']?['school_no'] ?? '').toString();
+      final noB = (b['users']?['school_no'] ?? '').toString();
+      return noA.compareTo(noB);
+    });
+    _totalStudents = _students.length;
 
     // 2. Fetch all attendance records
     final attendanceRes = await _supabase
         .from('attendance')
-        .select('date, student_id, is_present, users(first_name, last_name, school_no)')
+        .select('date, student_id, is_present')
         .eq('course_id', courseId)
         .order('date');
 
     _allAttendanceRecords = List<Map<String, dynamic>>.from(attendanceRes);
 
     // 3. Generate ALL scheduled dates for the term
+    _allScheduledDates = [];
+    for (
+      DateTime d = termStart;
+      d.isBefore(termEnd) || DateUtils.isSameDay(d, termEnd);
+      d = d.add(const Duration(days: 1))
+    ) {
+      final dayEnglish = DateFormat('EEEE').format(d).toLowerCase();
+      if (scheduledDays.contains(dayEnglish)) {
+        _allScheduledDates.add(d);
+      }
+    }
+
+    _totalLectures = _allScheduledDates.length;
+    _lecturesHeld = 0;
+
+    // 4. Group attendance by date for charts
     Map<String, List<bool>> groupedByDate = {};
     for (var record in _allAttendanceRecords) {
       final date = record['date'] as String;
@@ -92,23 +118,8 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
     List<String> labels = [];
     double totalRateSum = 0;
     int dayIndex = 0;
-    
-    List<DateTime> allScheduledDates = [];
-    for (
-      DateTime d = termStart;
-      d.isBefore(termEnd) || DateUtils.isSameDay(d, termEnd);
-      d = d.add(const Duration(days: 1))
-    ) {
-      final dayEnglish = DateFormat('EEEE').format(d).toLowerCase();
-      if (scheduledDays.contains(dayEnglish)) {
-        allScheduledDates.add(d);
-      }
-    }
 
-    _totalLectures = allScheduledDates.length;
-    _lecturesHeld = 0;
-
-    for (var date in allScheduledDates) {
+    for (var date in _allScheduledDates) {
       final dateStr = DateFormat('yyyy-MM-dd').format(date);
       final hasData = groupedByDate.containsKey(dateStr);
       
@@ -127,7 +138,6 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
           totalRateSum += rate;
           _lecturesHeld++;
         } else if (date.isBefore(DateTime.now())) {
-            // Even if no data, we count it as a lecture that was Supposed to be held
             _lecturesHeld++;
         }
         dayIndex++;
@@ -152,6 +162,12 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
     final font = await PdfGoogleFonts.robotoRegular();
     final boldFont = await PdfGoogleFonts.robotoBold();
     
+    // For general report, we fetch all users details for the records if they are missing
+    // In our new fetch we only get student_id in _allAttendanceRecords for performance, 
+    // but the general report needs names.
+    // Let's create a map for student details
+    final studentMap = {for (var s in _students) s['student_id']: s['users']};
+
     pdf.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
@@ -174,11 +190,11 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
             headers: ['Tarih', 'Okul No', 'İsim Soyisim', 'Durum'],
             headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
             data: _allAttendanceRecords.map((r) {
-              final student = r['users'] as Map<String, dynamic>;
+              final student = studentMap[r['student_id']] as Map<String, dynamic>? ?? {};
               return [
                 r['date'],
                 student['school_no'] ?? '-',
-                '${student['first_name']} ${student['last_name']}',
+                '${student['first_name'] ?? ''} ${student['last_name'] ?? ''}',
                 r['is_present'] ? 'VAR' : 'YOK',
               ];
             }).toList(),
@@ -189,6 +205,208 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
 
     final Uint8List bytes = await pdf.save();
     await Printing.sharePdf(bytes: bytes, filename: 'yoklama_raporu_${widget.course['course_code']}.pdf');
+  }
+
+  Future<void> _exportSelectedStudentsPDF() async {
+    if (_selectedStudentIds.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Lütfen en az bir öğrenci seçin')),
+      );
+      return;
+    }
+
+    final pdf = pw.Document();
+    final font = await PdfGoogleFonts.robotoRegular();
+    final boldFont = await PdfGoogleFonts.robotoBold();
+    
+    final selectedStudents = _students.where((s) => _selectedStudentIds.contains(s['student_id'])).toList();
+
+    if (selectedStudents.length > 1) {
+      // Landscape table for multiple students
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4.landscape,
+          theme: pw.ThemeData.withFont(base: font, bold: boldFont),
+          build: (pw.Context context) => [
+
+            pw.Header(
+              level: 0,
+              child: pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text('Öğrenci Devam Çizelgesi', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 16)),
+                  pw.Text(widget.course['course_code'], style: pw.TextStyle(color: PdfColors.grey)),
+                ],
+              ),
+            ),
+            pw.SizedBox(height: 20),
+            pw.Text('Ders: ${widget.course['course_name']}', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+            pw.Text('Rapor Tarihi: ${DateFormat('dd.MM.yyyy').format(DateTime.now())}'),
+            pw.SizedBox(height: 20),
+            pw.TableHelper.fromTextArray(
+              headers: ['No', 'Okul No', 'İsim Soyisim', ..._allScheduledDates.map((d) => DateFormat('dd/MM').format(d))],
+              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8),
+              cellStyle: const pw.TextStyle(fontSize: 7),
+              headerDecoration: const pw.BoxDecoration(color: PdfColors.grey200),
+              cellAlignment: pw.Alignment.center,
+              data: List.generate(selectedStudents.length, (index) {
+                final studentData = selectedStudents[index];
+                final student = studentData['users'] as Map<String, dynamic>;
+                final studentId = student['id'];
+                final studentAttendance = _allAttendanceRecords.where((r) => r['student_id'] == studentId).toList();
+                
+                return [
+                  (index + 1).toString(),
+                  student['school_no'] ?? '-',
+                  '${student['first_name']} ${student['last_name']}',
+                  ..._allScheduledDates.map((date) {
+                    final dateStr = DateFormat('yyyy-MM-dd').format(date);
+                    final record = studentAttendance.firstWhere((r) => r['date'] == dateStr, orElse: () => {});
+                    
+                    if (record.isEmpty) {
+                      return date.isBefore(DateTime.now()) ? 'YOK' : '-';
+                    }
+                    return record['is_present'] ? 'VAR' : 'YOK';
+                  }),
+                ];
+              }),
+            ),
+          ],
+        ),
+      );
+    } else {
+      // Single student detailed report (if only 1 selected, maybe keep the detailed view but fixed)
+      final studentData = selectedStudents.first;
+      final student = studentData['users'] as Map<String, dynamic>;
+      final studentId = student['id'];
+      
+      // Attendance for this student - unique dates only
+      final studentAttendance = _allAttendanceRecords.where((r) => r['student_id'] == studentId).toList();
+      
+      // Calculate stats based on unique scheduled dates
+      int presentCount = 0;
+      int totalPossibleHeld = 0;
+      
+      for (var date in _allScheduledDates) {
+        if (date.isAfter(DateTime.now())) continue;
+        totalPossibleHeld++;
+        final dateStr = DateFormat('yyyy-MM-dd').format(date);
+        final hasRecord = studentAttendance.any((r) => r['date'] == dateStr && r['is_present'] == true);
+        if (hasRecord) presentCount++;
+      }
+      
+      final rate = totalPossibleHeld > 0 ? (presentCount / totalPossibleHeld) * 100 : 0.0;
+
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          theme: pw.ThemeData.withFont(base: font, bold: boldFont),
+          build: (pw.Context context) => [
+            pw.Header(
+              level: 0,
+              child: pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text('Öğrenci Devam Raporu', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 16)),
+                  pw.Text(widget.course['course_code'], style: pw.TextStyle(color: PdfColors.grey)),
+                ],
+              ),
+            ),
+            pw.SizedBox(height: 20),
+            pw.Container(
+              padding: const pw.EdgeInsets.all(15),
+              decoration: pw.BoxDecoration(
+                border: pw.Border.all(color: PdfColors.grey300),
+                borderRadius: const pw.BorderRadius.all(pw.Radius.circular(10)),
+              ),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Row(
+                    children: [
+                      pw.Text('Öğrenci:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                      pw.SizedBox(width: 5),
+                      pw.Text('${student['first_name']} ${student['last_name']}'),
+                    ],
+                  ),
+                  pw.SizedBox(height: 5),
+                  pw.Row(
+                    children: [
+                      pw.Text('Okul No:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                      pw.SizedBox(width: 5),
+                      pw.Text(student['school_no'] ?? '-'),
+                    ],
+                  ),
+                  pw.SizedBox(height: 5),
+                  pw.Row(
+                    children: [
+                      pw.Text('Ders:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                      pw.SizedBox(width: 5),
+                      pw.Text(widget.course['course_name']),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            pw.SizedBox(height: 20),
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
+              children: [
+                _buildPdfStatCard('İşlenen Ders', totalPossibleHeld.toString()),
+                _buildPdfStatCard('Katılım Sağlanan', presentCount.toString()),
+                _buildPdfStatCard('Devam Oranı', '%${rate.toStringAsFixed(1)}'),
+              ],
+            ),
+            pw.SizedBox(height: 20),
+            pw.Text('Detaylı Yoklama Listesi', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 14)),
+            pw.SizedBox(height: 10),
+            pw.TableHelper.fromTextArray(
+              headers: ['No', 'Tarih', 'Durum'],
+              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+              cellAlignment: pw.Alignment.center,
+              data: List.generate(_allScheduledDates.length, (index) {
+                final date = _allScheduledDates[index];
+                final dateStr = DateFormat('yyyy-MM-dd').format(date);
+                final record = studentAttendance.firstWhere((r) => r['date'] == dateStr, orElse: () => {});
+                
+                String status = '-';
+                if (record.isNotEmpty) {
+                  status = record['is_present'] ? 'VAR' : 'YOK';
+                } else if (date.isBefore(DateTime.now())) {
+                  status = 'YOK';
+                }
+
+                return [
+                  (index + 1).toString(),
+                  DateFormat('dd.MM.yyyy').format(date),
+                  status,
+                ];
+              }),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final Uint8List bytes = await pdf.save();
+    await Printing.sharePdf(bytes: bytes, filename: 'ogrenci_devam_raporu_${widget.course['course_code']}.pdf');
+  }
+
+  pw.Widget _buildPdfStatCard(String label, String value) {
+    return pw.Container(
+      padding: const pw.EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+      decoration: pw.BoxDecoration(
+        color: PdfColors.grey100,
+        borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
+      ),
+      child: pw.Column(
+        children: [
+          pw.Text(label, style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700)),
+          pw.SizedBox(height: 4),
+          pw.Text(value, style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
+        ],
+      ),
+    );
   }
 
   Future<void> _exportToExcel() async {
@@ -383,13 +601,119 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
                         _buildSectionHeader('Katılım Trendi (%)', Icons.show_chart_rounded),
                         const SizedBox(height: 12),
                         _buildTrendChart(),
-                        const SizedBox(height: 40),
+                        const SizedBox(height: 32),
+                        _buildSectionHeader('Öğrenci Listesi & Devam Durumu', Icons.people_outline_rounded),
+                        const SizedBox(height: 12),
+                        _buildStudentAttendanceTable(),
+                        const SizedBox(height: 100),
                       ],
                     ),
                   ),
                 ],
               ),
             ),
+      floatingActionButton: _selectedStudentIds.isNotEmpty 
+        ? FloatingActionButton.extended(
+            onPressed: _exportSelectedStudentsPDF,
+            backgroundColor: AppColors.primary,
+            icon: const Icon(Icons.picture_as_pdf_rounded, color: Colors.white),
+            label: Text('Seçilenleri İndir (${_selectedStudentIds.length})', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          )
+        : null,
+    );
+  }
+
+  Widget _buildStudentAttendanceTable() {
+    if (_students.isEmpty) return const SizedBox();
+
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 20, offset: const Offset(0, 10)),
+        ],
+        border: Border.all(color: AppColors.border.withAlpha(5*25)),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: DataTable(
+            columnSpacing: 24,
+            horizontalMargin: 20,
+            headingRowHeight: 56,
+            dataRowMaxHeight: 60,
+            headingRowColor: WidgetStateProperty.all(AppColors.primary.withAlpha(1*25)),
+            columns: [
+              DataColumn(
+                label: const SizedBox.shrink(),
+              ),
+              ...List.generate(_allScheduledDates.length, (index) {
+                return DataColumn(
+                  label: Text(
+                    DateFormat('dd/MM').format(_allScheduledDates[index]),
+                    style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.textSecondary),
+                  ),
+                );
+              }),
+            ],
+            rows: _students.map((studentData) {
+              final student = studentData['users'] as Map<String, dynamic>;
+              final studentId = student['id'];
+              final isSelected = _selectedStudentIds.contains(studentId);
+              
+              final studentAttendance = _allAttendanceRecords.where((r) => r['student_id'] == studentId).toList();
+
+              return DataRow(
+                selected: isSelected,
+                onSelectChanged: (val) {
+                  setState(() {
+                    if (val == true) {
+                      _selectedStudentIds.add(studentId);
+                    } else {
+                      _selectedStudentIds.remove(studentId);
+                    }
+                  });
+                },
+                cells: [
+                  DataCell(
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text('${student['first_name']} ${student['last_name']}', 
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                        Text(student['school_no'] ?? '-', 
+                          style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
+                      ],
+                    ),
+                  ),
+                  ..._allScheduledDates.map((date) {
+                    final dateStr = DateFormat('yyyy-MM-dd').format(date);
+                    final record = studentAttendance.firstWhere((r) => r['date'] == dateStr, orElse: () => {});
+                    
+                    if (record.isEmpty) {
+                      if (date.isBefore(DateTime.now())) {
+                        return const DataCell(Icon(Icons.close_rounded, color: Colors.redAccent, size: 18));
+                      }
+                      return const DataCell(Text('-', style: TextStyle(color: Colors.grey)));
+                    }
+
+                    return DataCell(
+                      Icon(
+                        record['is_present'] ? Icons.check_circle_rounded : Icons.cancel_rounded,
+                        color: record['is_present'] ? Colors.green : Colors.redAccent,
+                        size: 20,
+                      ),
+                    );
+                  }),
+                ],
+              );
+            }).toList(),
+          ),
+        ),
+      ),
     );
   }
 

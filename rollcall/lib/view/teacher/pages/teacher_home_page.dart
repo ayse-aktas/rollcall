@@ -213,7 +213,6 @@ class _TeacherCourseCard extends StatefulWidget {
 
 class _TeacherCourseCardState extends State<_TeacherCourseCard> {
   int _studentCount = 0;
-  double? _averageRate;
 
   @override
   void initState() {
@@ -230,21 +229,9 @@ class _TeacherCourseCardState extends State<_TeacherCourseCard> {
         .select('student_id')
         .eq('course_id', courseId);
 
-    final attendance = await supabase
-        .from('attendance')
-        .select('is_present')
-        .eq('course_id', courseId);
-
-    double? average;
-    if (attendance.isNotEmpty) {
-      final present = attendance.where((r) => r['is_present'] == true).length;
-      average = (present / attendance.length) * 100;
-    }
-
     if (!mounted) return;
     setState(() {
       _studentCount = enrollments.length;
-      _averageRate = average;
     });
   }
 
@@ -312,15 +299,6 @@ class _TeacherCourseCardState extends State<_TeacherCourseCard> {
                   icon: Icons.people_outline,
                   label: '$_studentCount öğrenci',
                 ),
-                const SizedBox(width: 10),
-                if (_averageRate != null)
-                  _StatChip(
-                    icon: Icons.bar_chart_rounded,
-                    label: 'Ort. %${_averageRate!.toStringAsFixed(0)}',
-                    color: _averageRate! >= 70
-                        ? AppColors.success
-                        : AppColors.warning,
-                  ),
               ],
             ),
           ],
@@ -333,11 +311,9 @@ class _TeacherCourseCardState extends State<_TeacherCourseCard> {
 class _StatChip extends StatelessWidget {
   final IconData icon;
   final String label;
-  final Color color;
   const _StatChip({
     required this.icon,
     required this.label,
-    this.color = AppColors.textSecondary,
   });
 
   @override
@@ -350,9 +326,9 @@ class _StatChip extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(icon, size: 13, color: color),
+          Icon(icon, size: 13, color: AppColors.textSecondary),
           const SizedBox(width: 5),
-          Text(label, style: TextStyle(color: color, fontSize: 12)),
+          Text(label, style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
         ],
       ),
     );

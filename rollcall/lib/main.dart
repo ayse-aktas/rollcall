@@ -14,6 +14,7 @@ import 'view/admin/admin_page.dart';
 import 'view/splash/splash_page.dart';
 import 'view/login/forgot_password_page.dart';
 import 'view/login/reset_password_page.dart';
+import 'view/login/support_form_page.dart';
 
 import 'core/utils/logger.dart';
 
@@ -44,20 +45,24 @@ void main() async {
 }
 
 Future<void> _setupNotifications() async {
-  FirebaseMessaging messaging = FirebaseMessaging.instance;
+  try {
+    FirebaseMessaging messaging = FirebaseMessaging.instance;
 
-  // 1. Bildirim İzni İste
-  await messaging.requestPermission(alert: true, badge: true, sound: true);
+    // 1. Bildirim İzni İste
+    await messaging.requestPermission(alert: true, badge: true, sound: true);
 
-  // 2. 'all' kanalına abone ol (Hocanın attığı bildirimler için)
-  await messaging.subscribeToTopic("all");
+    // 2. 'all' kanalına abone ol (Hocanın attığı bildirimler için)
+    await messaging.subscribeToTopic("all");
 
-  // 3. Android için ön plan bildirim önceliğini ayarla
-  await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
-    alert: true,
-    badge: true,
-    sound: true,
-  );
+    // 3. Android için ön plan bildirim önceliğini ayarla
+    await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
+  } catch (e) {
+    AppLogger.e('Firebase Messaging Hatası: $e');
+  }
 }
 
 class MyApp extends StatelessWidget {
@@ -81,6 +86,7 @@ class MyApp extends StatelessWidget {
           return TeacherAnalyticsPage(course: args);
         },
         '/admin-panel': (context) => const AdminPage(),
+        '/support': (context) => const SupportFormPage(),
       },
 
     );

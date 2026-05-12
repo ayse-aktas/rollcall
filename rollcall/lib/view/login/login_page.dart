@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/utils/security_utils.dart';
 
-enum LoginType { student, teacher }
+enum LoginType { student, teacher, admin }
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -71,13 +71,16 @@ class _LoginPageState extends State<LoginPage>
       final role = userData['role'] as String;
       final registeredDeviceId = userData['device_id'] as String?;
 
-      // 2. Rol (Sekme) Kontrolü
       if (_loginType == LoginType.student && role != 'student') {
         setState(() => _errorMessage = 'Bu hesap bir öğrenci hesabı değildir.\nLütfen Akademisyen sekmesini deneyin.');
         return;
       }
       if (_loginType == LoginType.teacher && role != 'teacher') {
         setState(() => _errorMessage = 'Bu hesap bir akademisyen hesabı değildir.\nLütfen Öğrenci sekmesini deneyin.');
+        return;
+      }
+      if (_loginType == LoginType.admin && role != 'admin') {
+        setState(() => _errorMessage = 'Bu hesap bir yönetici hesabı değildir.');
         return;
       }
 
@@ -116,18 +119,18 @@ class _LoginPageState extends State<LoginPage>
 
       if (!mounted) return;
 
-      if (role == 'student') {
-        Navigator.pushReplacementNamed(context, '/ogrenci-anasayfa');
+      if (role == 'admin') {
+        Navigator.pushReplacementNamed(context, '/admin-panel');
       } else if (role == 'teacher') {
         Navigator.pushReplacementNamed(context, '/ogretmen-anasayfa');
-      } else if (role == 'admin') {
-        Navigator.pushReplacementNamed(context, '/admin-panel');
+      } else if (role == 'student') {
+        Navigator.pushReplacementNamed(context, '/ogrenci-anasayfa');
       }
     } on AuthException catch (e) {
       setState(() => _errorMessage = 'Giriş başarısız: ${_translateAuthError(e.message)}');
     } catch (e) {
       debugPrint('Login Error: $e');
-      setState(() => _errorMessage = 'Giriş işlemi sırasında bir hata oluştu.');
+      setState(() => _errorMessage = 'Hata: $e');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -330,24 +333,27 @@ class _LoginPageState extends State<LoginPage>
             _buildSignInButton(),
             const SizedBox(height: 32),
             Center(
-              child: Text.rich(
-                TextSpan(
-                  text: "Hesabınız yok mu? ",
-                  style: const TextStyle(
-                    color: Color(0xFF6F767E),
-                    fontSize: 13,
-                  ),
-                  children: [
-                    TextSpan(
-                      text: "Bölümünüzden erişim talep edin.",
-                      style: const TextStyle(
-                        color: Color(0xFF1E60D2),
-                        fontWeight: FontWeight.w700,
-                      ),
+              child: GestureDetector(
+                onTap: () => Navigator.pushNamed(context, '/support'),
+                child: Text.rich(
+                  TextSpan(
+                    text: "Bir sorun mu var? ",
+                    style: const TextStyle(
+                      color: Color(0xFF6F767E),
+                      fontSize: 13,
                     ),
-                  ],
+                    children: [
+                      TextSpan(
+                        text: "Yönetici ile iletişime geçin.",
+                        style: const TextStyle(
+                          color: Color(0xFF1E60D2),
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                  textAlign: TextAlign.center,
                 ),
-                textAlign: TextAlign.center,
               ),
             ),
           ],
@@ -368,6 +374,7 @@ class _LoginPageState extends State<LoginPage>
         children: [
           Expanded(child: _buildToggleItem(LoginType.student, 'Öğrenci')),
           Expanded(child: _buildToggleItem(LoginType.teacher, 'Akademisyen')),
+          Expanded(child: _buildToggleItem(LoginType.admin, 'Admin')),
         ],
       ),
     );
