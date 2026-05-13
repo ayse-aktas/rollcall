@@ -88,41 +88,54 @@ class _StudentHomePageState extends State<StudentHomePage> {
     final uid = _supabase.auth.currentUser?.id;
     if (uid == null) return;
 
+    Map<String, dynamic>? profile;
+    List<Map<String, dynamic>> enrollments = [];
+    List<Map<String, dynamic>> notifications = [];
+
     try {
-      final profile = await _supabase
+      profile = await _supabase
           .from('users')
           .select()
           .eq('id', uid)
           .single();
+    } catch (e) {
+      debugPrint('Student profile could not be loaded: $e');
+    }
 
-      final enrollments = await _supabase
+    try {
+      final enrollmentRows = await _supabase
           .from('student_courses')
           .select(
             'course_id, courses(id, course_name, course_code, course_day, course_time, course_end_time)',
           )
           .eq('student_id', uid);
+      enrollments = List<Map<String, dynamic>>.from(enrollmentRows);
+    } catch (e) {
+      debugPrint('Student courses could not be loaded: $e');
+    }
 
-      final notifications = await _supabase
+    try {
+      final notificationRows = await _supabase
           .from('notifications')
           .select('id, message, type, is_read, created_at')
-          .eq('student_id', uid)
+          .eq('user_id', uid)
           .order('created_at', ascending: false)
           .limit(100);
-
-      if (!mounted) return;
-      setState(() {
-        _profile = profile;
-        _courses = List<Map<String, dynamic>>.from(enrollments);
-        _notifications = List<Map<String, dynamic>>.from(notifications);
-        _isLoading = false;
-      });
-
-      // Initialize Automatic Attendance Service
-      _initAutoAttendance(uid);
+      notifications = List<Map<String, dynamic>>.from(notificationRows);
     } catch (e) {
-      if (!mounted) return;
-      setState(() => _isLoading = false);
+      debugPrint('Student notifications could not be loaded: $e');
     }
+
+    if (!mounted) return;
+    setState(() {
+      _profile = profile;
+      _courses = enrollments;
+      _notifications = notifications;
+      _isLoading = false;
+    });
+
+    // Initialize Automatic Attendance Service
+    _initAutoAttendance(uid);
   }
 
   void _initAutoAttendance(String studentId) {

@@ -127,6 +127,7 @@ class _LoginPageState extends State<LoginPage>
         Navigator.pushReplacementNamed(context, '/ogrenci-anasayfa');
       }
     } on AuthException catch (e) {
+      debugPrint('Auth login error: message=${e.message}, status=${e.statusCode}, code=${e.code}');
       setState(() => _errorMessage = 'Giriş başarısız: ${_translateAuthError(e.message)}');
     } catch (e) {
       debugPrint('Login Error: $e');
@@ -141,7 +142,7 @@ class _LoginPageState extends State<LoginPage>
     if (message.contains('Invalid login credentials')) {
       return 'E-posta veya şifre hatalı.';
     }
-    return 'Giriş yapılamadı. Lütfen tekrar deneyin.';
+    return message;
   }
 
   @override
