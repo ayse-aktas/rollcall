@@ -83,7 +83,7 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
     // 2. Fetch all attendance records
     final attendanceRes = await _supabase
         .from('attendance')
-        .select('date, student_id, is_present')
+        .select('date, student_id, is_present, slot, taken_by, users!attendance_taken_by_fkey(first_name, last_name, title)')
         .eq('course_id', courseId)
         .order('date');
 
@@ -187,14 +187,23 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
           pw.Text('Yapılan Ders: $_lecturesHeld / $_totalLectures'),
           pw.SizedBox(height: 20),
           pw.TableHelper.fromTextArray(
-            headers: ['Tarih', 'Okul No', 'İsim Soyisim', 'Durum'],
-            headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+            headers: ['Tarih', 'Okul No', 'İsim Soyisim', 'Hoca', 'Durum'],
+            headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10),
+            cellStyle: const pw.TextStyle(fontSize: 9),
             data: _allAttendanceRecords.map((r) {
               final student = studentMap[r['student_id']] as Map<String, dynamic>? ?? {};
+              final taker = r['users'] as Map<String, dynamic>?;
+              final takerName = taker != null 
+                ? '${taker['title'] ?? ''} ${taker['first_name']} ${taker['last_name']}'.trim()
+                : '-';
+              final slot = r['slot'] as int? ?? 1;
+              final dateDisplay = '${r['date']}${slot > 1 ? ' ($slot. Ders)' : ''}';
+              
               return [
-                r['date'],
+                dateDisplay,
                 student['school_no'] ?? '-',
                 '${student['first_name'] ?? ''} ${student['last_name'] ?? ''}',
+                takerName,
                 r['is_present'] ? 'VAR' : 'YOK',
               ];
             }).toList(),

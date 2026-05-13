@@ -2,6 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/utils/theme/colors/app_colors.dart';
 
+const List<String> kAcademicTitles = [
+  'Prof.Dr.',
+  'Doç.Dr.',
+  'Dr.Öğr.Üyesi',
+  'Öğr.Gör.',
+  'Arş.Gör.',
+  'Dr.',
+  '-',
+];
+
 class UserDetailPage extends StatefulWidget {
   final Map<String, dynamic> user;
   const UserDetailPage({super.key, required this.user});
@@ -14,17 +24,17 @@ class _UserDetailPageState extends State<UserDetailPage> {
   final _supabase = Supabase.instance.client;
   List<Map<String, dynamic>> _studentCourses = [];
   bool _isLoading = true;
+  String? _selectedTitle;
 
   @override
   void initState() {
     super.initState();
+    _selectedTitle = widget.user['title'] as String?;
     _loadData();
   }
 
   Future<void> _loadData() async {
     try {
-      debugPrint('Dersler yükleniyor... Student ID: ${widget.user['id']}');
-      
       final res = await _supabase
           .from('student_courses')
           .select('*, courses(*)')
@@ -35,12 +45,7 @@ class _UserDetailPageState extends State<UserDetailPage> {
         _studentCourses = List<Map<String, dynamic>>.from(res);
         _isLoading = false;
       });
-      
-      if (_studentCourses.isEmpty) {
-        debugPrint('Uyarı: Bu öğrenci için hiç ders kaydı bulunamadı.');
-      }
     } catch (e) {
-      debugPrint('Ders yükleme hatası detay: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Dersler getirilemedi: $e'), backgroundColor: Colors.red),
@@ -50,8 +55,29 @@ class _UserDetailPageState extends State<UserDetailPage> {
     }
   }
 
+  Future<void> _saveTitle(String? title) async {
+    try {
+      await _supabase
+          .from('users')
+          .update({'title': (title == '-' || title == null) ? null : title})
+          .eq('id', widget.user['id']);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unvan güncellendi'), backgroundColor: AppColors.success),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Hata: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isTeacher = widget.user['role'] == 'teacher';
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -67,18 +93,21 @@ class _UserDetailPageState extends State<UserDetailPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildProfileSection(),
+                  _buildProfileSection(isTeacher),
                   const SizedBox(height: 24),
-                  const Text('Kayıtlı Dersler', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 12),
-                  ..._studentCourses.map((sc) => _buildCourseCard(sc)),
+                  if (widget.user['role'] == 'student') ...[
+                    const Text('Kayıtlı Dersler',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 12),
+                    ..._studentCourses.map((sc) => _buildCourseCard(sc)),
+                  ],
                 ],
               ),
             ),
     );
   }
 
-  Widget _buildProfileSection() {
+  Widget _buildProfileSection(bool isTeacher) {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -90,10 +119,46 @@ class _UserDetailPageState extends State<UserDetailPage> {
         children: [
           _buildInfoRow(Icons.email_outlined, 'E-posta', widget.user['email'] ?? '-'),
           _buildInfoRow(Icons.badge_outlined, 'Okul No', widget.user['school_no']?.toString() ?? '-'),
-          _buildInfoRow(Icons.person_outline, 'Rol', widget.user['role'] ?? '-'),
+          _buildInfoRow(Icons.person_outline, 'Rol', _roleLabel(widget.user['role'])),
+          if (isTeacher) ...[
+            const Divider(height: 24),
+            Row(
+              children: [
+                const Icon(Icons.school_rounded, size: 20, color: AppColors.primary),
+                const SizedBox(width: 12),
+                const Text('Akademik Unvan',
+                    style: TextStyle(color: AppColors.textSecondary)),
+                const Spacer(),
+                DropdownButton<String>(
+                  value: kAcademicTitles.contains(_selectedTitle) ? _selectedTitle : '-',
+                  underline: const SizedBox(),
+                  style: const TextStyle(
+                      color: AppColors.textPrimary,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14),
+                  items: kAcademicTitles
+                      .map((t) => DropdownMenuItem(value: t, child: Text(t)))
+                      .toList(),
+                  onChanged: (v) {
+                    setState(() => _selectedTitle = v);
+                    _saveTitle(v);
+                  },
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  String _roleLabel(String? role) {
+    const map = {
+      'student': 'Öğrenci',
+      'teacher': 'Öğretim Elemanı',
+      'admin': 'Yönetici',
+    };
+    return map[role] ?? role ?? '-';
   }
 
   Widget _buildInfoRow(IconData icon, String label, String value) {
@@ -153,8 +218,9 @@ class _AttendanceListState extends State<_AttendanceList> {
         .select('*')
         .eq('student_id', widget.studentId)
         .eq('course_id', widget.courseId)
-        .order('date', ascending: false);
-    
+        .order('date', ascending: false)
+        .order('slot', ascending: true);
+
     if (!mounted) return;
     setState(() {
       _records = List<Map<String, dynamic>>.from(res);
@@ -165,24 +231,30 @@ class _AttendanceListState extends State<_AttendanceList> {
   @override
   Widget build(BuildContext context) {
     if (_loading) return const LinearProgressIndicator();
-    if (_records.isEmpty) return const Padding(padding: EdgeInsets.all(16), child: Text('Yoklama kaydı bulunamadı.'));
+    if (_records.isEmpty) {
+      return const Padding(padding: EdgeInsets.all(16), child: Text('Yoklama kaydı bulunamadı.'));
+    }
 
     return Column(
-      children: _records.map((r) => ListTile(
-        title: Text(r['date'] ?? '-'),
-        subtitle: Text(r['is_present'] == true ? 'Geldi' : 'Gelmedi'),
-        trailing: IconButton(
-          icon: const Icon(Icons.edit_outlined, size: 20),
-          onPressed: () => _showUpdateDialog(r),
-        ),
-      )).toList(),
+      children: _records.map((r) {
+        final slot = r['slot'] as int? ?? 1;
+        final slotLabel = slot > 1 ? ' · ${slot}. Ders' : '';
+        return ListTile(
+          title: Text('${r['date'] ?? '-'}$slotLabel'),
+          subtitle: Text(r['is_present'] == true ? 'Geldi' : 'Gelmedi'),
+          trailing: IconButton(
+            icon: const Icon(Icons.edit_outlined, size: 20),
+            onPressed: () => _showUpdateDialog(r),
+          ),
+        );
+      }).toList(),
     );
   }
 
   void _showUpdateDialog(Map<String, dynamic> record) {
     final commentC = TextEditingController();
     final docC = TextEditingController();
-    bool newIsPresent = record['is_present'] == true ? false : true;
+    bool newIsPresent = record['is_present'] != true;
 
     showDialog(
       context: context,
@@ -206,13 +278,16 @@ class _AttendanceListState extends State<_AttendanceList> {
               const SizedBox(height: 12),
               TextField(
                 controller: commentC,
-                decoration: const InputDecoration(labelText: 'Açıklama (Zorunlu)', border: OutlineInputBorder()),
+                decoration: const InputDecoration(
+                    labelText: 'Açıklama (Zorunlu)', border: OutlineInputBorder()),
                 maxLines: 2,
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: docC,
-                decoration: const InputDecoration(labelText: 'Dilekçe/Belge Kodu (Opsiyonel)', border: OutlineInputBorder()),
+                decoration: const InputDecoration(
+                    labelText: 'Dilekçe/Belge Kodu (Opsiyonel)',
+                    border: OutlineInputBorder()),
               ),
             ],
           ),
@@ -221,22 +296,26 @@ class _AttendanceListState extends State<_AttendanceList> {
             ElevatedButton(
               onPressed: () async {
                 if (commentC.text.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Lütfen açıklama yazın!')));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Lütfen açıklama yazın!')));
                   return;
                 }
-                
                 final confirm = await showDialog<bool>(
                   context: context,
                   builder: (context) => AlertDialog(
                     title: const Text('Onay Gerekiyor'),
-                    content: const Text('Bu yoklama değişikliğini kaydetmek istediğinize emin misiniz?'),
+                    content: const Text(
+                        'Bu yoklama değişikliğini kaydetmek istediğinize emin misiniz?'),
                     actions: [
-                      TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Hayır')),
-                      TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Evet, Kaydet')),
+                      TextButton(
+                          onPressed: () => Navigator.pop(context, false),
+                          child: const Text('Hayır')),
+                      TextButton(
+                          onPressed: () => Navigator.pop(context, true),
+                          child: const Text('Evet, Kaydet')),
                     ],
                   ),
                 );
-
                 if (confirm == true) {
                   await _performUpdate(record, newIsPresent, commentC.text, docC.text);
                   if (mounted) Navigator.pop(context);
@@ -250,14 +329,14 @@ class _AttendanceListState extends State<_AttendanceList> {
     );
   }
 
-  Future<void> _performUpdate(Map<String, dynamic> record, bool newIsPresent, String comment, String docCode) async {
+  Future<void> _performUpdate(Map<String, dynamic> record, bool newIsPresent,
+      String comment, String docCode) async {
     try {
       final adminId = _supabase.auth.currentUser?.id;
-      
-      // 1. Update Attendance
-      await _supabase.from('attendance').update({'is_present': newIsPresent}).eq('id', record['id']);
-      
-      // 2. Create Audit Log
+      await _supabase
+          .from('attendance')
+          .update({'is_present': newIsPresent})
+          .eq('id', record['id']);
       await _supabase.from('attendance_logs').insert({
         'attendance_id': record['id'],
         'admin_id': adminId,
@@ -266,18 +345,21 @@ class _AttendanceListState extends State<_AttendanceList> {
         'comment': comment,
         'document_code': docCode,
       });
-
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Yoklama başarıyla güncellendi.'), backgroundColor: AppColors.success),
+          const SnackBar(
+              content: Text('Yoklama başarıyla güncellendi.'),
+              backgroundColor: AppColors.success),
         );
       }
       _loadRecords();
     } catch (e) {
-      debugPrint('Güncelleme hatası: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Kayıt sırasında bir hata oluştu: $e'), backgroundColor: Colors.red, duration: const Duration(seconds: 5)),
+          SnackBar(
+              content: Text('Kayıt sırasında bir hata oluştu: $e'),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 5)),
         );
       }
     }

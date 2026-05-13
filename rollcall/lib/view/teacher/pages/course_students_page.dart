@@ -112,6 +112,7 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
   int _automationTimer = 0;
   Timer? _automationCountdownTimer;
   String _sortBy = 'Okul No';
+  int _selectedSlot = 1;
 
   @override
   void didChangeDependencies() {
@@ -150,7 +151,8 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
         .from('attendance')
         .select('student_id, is_present')
         .eq('course_id', courseId)
-        .eq('date', dateStr);
+        .eq('date', dateStr)
+        .eq('slot', _selectedSlot);
 
     final Map<String, bool> attendanceMap = {};
     for (var record in attendanceRecords) {
@@ -318,12 +320,15 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
     });
 
     try {
+      final myId = _supabase.auth.currentUser?.id;
       await _supabase.from('attendance').upsert({
         'student_id': studentId,
         'course_id': courseId,
         'date': dateStr,
+        'slot': _selectedSlot,
         'is_present': newVal,
-      }, onConflict: 'student_id, course_id, date');
+        'taken_by': myId,
+      }, onConflict: 'student_id, course_id, date, slot');
       if (_sortBy == 'Durum') _sortStudents();
     } catch (e) {
       if (!mounted) return;
