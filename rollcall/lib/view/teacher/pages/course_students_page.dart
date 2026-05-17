@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'dart:convert';
 import 'dart:async';
+
 import 'package:beacon_broadcast/beacon_broadcast.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../../core/utils/security_utils.dart';
@@ -113,6 +114,12 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
   Timer? _automationCountdownTimer;
   String _sortBy = 'Okul No';
   int _selectedSlot = 1;
+  List<int> _plannedMinutes = [];
+  Timer? _plannedAttendanceCheckTimer;
+  bool _isIntervalMode = false;
+  int _intervalMinutes = 30;
+  int _lastTriggeredMinute = -1;
+  String _countdownText = '';
 
   @override
   void didChangeDependencies() {
@@ -391,6 +398,154 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
     return scheduledDays.contains(dayEnglish);
   }
 
+  void _showPlannedAttendanceDialog() {
+    if (_course == null) return;
+    
+    final String startTimeStr = _course!['course_time'] ?? '00:00:00';
+    final String endTimeStr = _course!['course_end_time'] ?? '00:00:00';
+    
+    final startParts = startTimeStr.split(':');
+    final endParts = endTimeStr.split(':');
+    
+    final int startH = int.parse(startParts[0]);
+    final int startM = int.parse(startParts[1]);
+    final int endH = int.parse(endParts[0]);
+    final int endM = int.parse(endParts[1]);
+    
+    final int startTotal = startH * 60 + startM;
+    int endTotal = endH * 60 + endM;
+    if (endTotal <= startTotal) {
+      endTotal = startTotal + 180; 
+    }
+    
+    int totalDurationMinutes = endTotal - startTotal;
+    
+    final now = DateTime.now();
+    final classStartTime = DateTime(now.year, now.month, now.day, startH, startM);
+    final elapsedMinutes = now.difference(classStartTime).inMinutes;
+    
+    int _customMinute = elapsedMinutes > 45 ? elapsedMinutes + 5 : 60;
+    if (_customMinute > totalDurationMinutes) _customMinute = totalDurationMinutes;
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: const Text('Planlı Yoklama Ayarla', style: TextStyle(fontWeight: FontWeight.bold)),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Her kaç dakikada bir yoklama alınsın?', style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: DropdownButton<int>(
+                        value: _intervalMinutes,
+                        isExpanded: true,
+                        underline: const SizedBox(),
+                        items: [30, 45, 60, 90, 120].map((int val) {
+                          return DropdownMenuItem<int>(
+                            value: val,
+                            child: Text('$val dakikada bir'),
+                          );
+                        }).toList(),
+                        onChanged: (val) {
+                          if (val != null) {
+                            setDialogState(() {
+                              _intervalMinutes = val;
+                            });
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'En fazla sıklık olarak 30 dk seçilebilir.',
+                      style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Kapat', style: TextStyle(color: AppColors.textSecondary)),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    setDialogState(() {
+                      _isIntervalMode = true; // Always true now
+                    });
+                    _startPlannedAttendanceMonitoring();
+                    Navigator.pop(context);
+                  },
+                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+                  child: const Text('Kaydet'),
+                ),
+              ],
+            );
+          }
+        );
+      },
+    );
+
+
+  }
+
+  void _startPlannedAttendanceMonitoring() {
+    _plannedAttendanceCheckTimer?.cancel();
+    if (!_isIntervalMode) return;
+
+    _plannedAttendanceCheckTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_course == null) return;
+      
+      final String startTimeStr = _course!['course_time'] ?? '00:00:00';
+      final startParts = startTimeStr.split(':');
+      final int startH = int.parse(startParts[0]);
+      final int startM = int.parse(startParts[1]);
+
+      final now = DateTime.now();
+      final classStartTime = DateTime(now.year, now.month, now.day, startH, startM);
+      
+      final elapsedMinutes = now.difference(classStartTime).inMinutes;
+
+      // Calculate countdown to next interval
+      final nextAttendanceMinute = ((elapsedMinutes ~/ _intervalMinutes) + 1) * _intervalMinutes;
+      final nextAttendanceTime = classStartTime.add(Duration(minutes: nextAttendanceMinute));
+      final remaining = nextAttendanceTime.difference(now);
+      
+      if (remaining.isNegative) {
+        _countdownText = '00:00:00';
+      } else {
+        final hours = remaining.inHours.toString().padLeft(2, '0');
+        final minutes = (remaining.inMinutes % 60).toString().padLeft(2, '0');
+        final seconds = (remaining.inSeconds % 60).toString().padLeft(2, '0');
+        _countdownText = '$hours:$minutes:$seconds';
+      }
+      
+      setState(() {}); // Update UI for countdown
+
+      if (elapsedMinutes > 0 && elapsedMinutes != _lastTriggeredMinute) {
+        if (elapsedMinutes % _intervalMinutes == 0) {
+          if (!_isAutomationRunning) {
+            _startAutomaticAttendance();
+            _lastTriggeredMinute = elapsedMinutes;
+          }
+        }
+      }
+    });
+  }
+
   bool _canOpenQR() {
     if (_course == null) return false;
     if (!DateUtils.isSameDay(_selectedDate, DateTime.now())) return false;
@@ -597,6 +752,48 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                                 isActive: _isAutomationRunning,
                                 timer: _automationTimer,
                                 onTap: _startAutomaticAttendance,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: InkWell(
+                                onTap: _showPlannedAttendanceDialog,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.2),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: Colors.white.withValues(alpha: 0.3),
+                                      width: 1,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      const Icon(
+                                        Icons.schedule_rounded,
+                                        color: Colors.white,
+                                        size: 20,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        _isIntervalMode && _countdownText.isNotEmpty
+                                          ? 'Sonraki: $_countdownText'
+                                          : 'Planlı Yoklama Ayarla',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                               ),
                             ),
                           ],
@@ -1738,3 +1935,5 @@ class _CustomCalendarDialogState extends State<_CustomCalendarDialog> {
     );
   }
 }
+
+
