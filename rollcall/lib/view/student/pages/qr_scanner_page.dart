@@ -84,8 +84,37 @@ class _QRScannerPageState extends State<QRScannerPage> {
 
       final String courseId = data['course_id'];
       final String date = data['date'];
+      final int slot = data['slot'] ?? 1;
       final bool isSecure = data['secure'] ?? false;
       final String? expectedBeaconToken = data['beacon_token'];
+      final double? teacherLat = data['lat'];
+      final double? teacherLng = data['lng'];
+
+      // NEW: Distance Check (15 meters)
+      if (teacherLat != null && teacherLng != null) {
+        LocationPermission permission = await Geolocator.checkPermission();
+        if (permission == LocationPermission.denied) {
+          permission = await Geolocator.requestPermission();
+          if (permission == LocationPermission.denied) {
+            throw 'Konum izni reddedildi.';
+          }
+        }
+        
+        final studentPosition = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+        );
+        
+        final distance = Geolocator.distanceBetween(
+          teacherLat,
+          teacherLng,
+          studentPosition.latitude,
+          studentPosition.longitude,
+        );
+        
+        if (distance > 15) {
+          throw 'Hocaya çok uzaksınız. QR kodu okutabilmek için hocaya 15 metreden daha yakın olmalısınız. (Uzaklık: ${distance.toStringAsFixed(1)} m)';
+        }
+      }
 
       // SECURE MODE VALIDATION
       if (isSecure && expectedBeaconToken != null) {
@@ -178,8 +207,9 @@ class _QRScannerPageState extends State<QRScannerPage> {
           'student_id': studentId,
           'course_id': courseId,
           'date': date,
+          'slot': slot,
           'is_present': true,
-          'attendance_method': 'qr',
+          'verify_method': 'qr',
         });
       } on PostgrestException catch (e) {
         if (e.code == '42501') {
@@ -217,23 +247,56 @@ class _QRScannerPageState extends State<QRScannerPage> {
   ) async {
     final supabaseClient = Supabase.instance.client;
     try {
-      await supabaseClient
+      final existing = await supabaseClient
           .from('attendance')
-          .upsert(values, onConflict: 'student_id, course_id, date');
+          .select('id')
+          .eq('student_id', values['student_id'])
+          .eq('course_id', values['course_id'])
+          .eq('date', values['date'])
+          .eq('slot', values['slot'])
+          .maybeSingle();
+
+      if (existing != null) {
+        await supabaseClient
+            .from('attendance')
+            .update(values)
+            .eq('id', existing['id']);
+      } else {
+        await supabaseClient
+            .from('attendance')
+            .insert(values);
+      }
     } on PostgrestException catch (e) {
       final message = e.message.toLowerCase();
       final isMissingMethodColumn =
           e.code == 'PGRST204' ||
           e.code == '42703' ||
-          message.contains('attendance_method') ||
+          message.contains('verify_method') ||
           message.contains('column');
       if (!isMissingMethodColumn) rethrow;
 
       final fallbackValues = Map<String, dynamic>.from(values)
-        ..remove('attendance_method');
-      await supabaseClient
+        ..remove('verify_method');
+        
+      final existing = await supabaseClient
           .from('attendance')
-          .upsert(fallbackValues, onConflict: 'student_id, course_id, date');
+          .select('id')
+          .eq('student_id', fallbackValues['student_id'])
+          .eq('course_id', fallbackValues['course_id'])
+          .eq('date', fallbackValues['date'])
+          .eq('slot', fallbackValues['slot'])
+          .maybeSingle();
+
+      if (existing != null) {
+        await supabaseClient
+            .from('attendance')
+            .update(fallbackValues)
+            .eq('id', existing['id']);
+      } else {
+        await supabaseClient
+            .from('attendance')
+            .insert(fallbackValues);
+      }
     }
   }
 

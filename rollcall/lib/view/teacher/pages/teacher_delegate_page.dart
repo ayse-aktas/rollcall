@@ -39,22 +39,34 @@ class _TeacherDelegatePageState extends State<TeacherDelegatePage> {
 
   Future<void> _loadTeachers() async {
     final myId = _supabase.auth.currentUser?.id;
-    final res = await _supabase
-        .from('users')
-        .select('id, first_name, last_name, title, school_no')
-        .eq('role', 'teacher')
-        .order('first_name');
+    try {
+      final res = await _supabase
+          .from('users')
+          .select('id, first_name, last_name, title, school_no')
+          .eq('role', 'teacher')
+          .order('first_name');
 
-    final list = List<Map<String, dynamic>>.from(res)
-        .where((u) => u['id'] != myId) // don't show yourself
-        .toList();
+      final list = List<Map<String, dynamic>>.from(res)
+          .where((u) => u['id'] != myId) // don't show yourself
+          .toList();
 
-    if (!mounted) return;
-    setState(() {
-      _teachers = list;
-      _filtered = list;
-      _isLoading = false;
-    });
+      if (!mounted) return;
+      setState(() {
+        _teachers = list;
+        _filtered = list;
+        _isLoading = false;
+      });
+    } catch (e) {
+      debugPrint('Teachers could not be loaded: $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Hocalar yüklenirken hata oluştu: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   void _filterTeachers() {
@@ -148,15 +160,6 @@ class _TeacherDelegatePageState extends State<TeacherDelegatePage> {
           icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 20),
           onPressed: () => Navigator.pop(context),
         ),
-        actions: [
-          if (_isSaving)
-            const Center(child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)))
-          else if (hasChanged)
-            TextButton(
-              onPressed: _save,
-              child: const Text('Kaydet', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-            ),
-        ],
       ),
       body: Column(
         children: [
@@ -291,7 +294,7 @@ class _TeacherDelegatePageState extends State<TeacherDelegatePage> {
           ),
         ],
       ),
-      bottomNavigationBar: hasChanged
+      bottomNavigationBar: (hasChanged && _selectedId != null)
           ? SafeArea(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
@@ -343,8 +346,33 @@ class _TeacherDelegatePageState extends State<TeacherDelegatePage> {
             ),
           ),
           TextButton(
-            onPressed: () => setState(() => _selectedId = null),
+            onPressed: () => _showCancelConfirmation(context),
             child: const Text('İptal Et', style: TextStyle(color: Colors.orange)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showCancelConfirmation(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Devri İptal Et'),
+        content: const Text('Bu dersin devrini iptal etmek istediğinize emin misiniz? Yetki tekrar sizde olacaktır.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Vazgeç'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context); // Close dialog
+              setState(() => _selectedId = null);
+              _save(); // Directly save!
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            child: const Text('Evet, İptal Et', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),

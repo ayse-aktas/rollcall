@@ -8,6 +8,7 @@ import 'dart:async';
 
 import 'package:beacon_broadcast/beacon_broadcast.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:geolocator/geolocator.dart';
 import '../../../core/utils/security_utils.dart';
 import '../../../core/services/person_detector_service.dart';
 import 'verification_camera_page.dart';
@@ -118,6 +119,7 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
   Timer? _plannedAttendanceCheckTimer;
   bool _isIntervalMode = false;
   int _intervalMinutes = 30;
+  bool _isDelegated = false;
   int _lastTriggeredMinute = -1;
   String _countdownText = '';
 
@@ -165,10 +167,15 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
     for (var record in attendanceRecords) {
       attendanceMap[record['student_id']] = record['is_present'] ?? false;
     }
+    
+    final myId = _supabase.auth.currentUser?.id;
+    final assignedTeacherId = courseDetails['assigned_teacher_id'];
+    final isDelegated = assignedTeacherId != null && assignedTeacherId != myId;
 
     if (!mounted) return;
     setState(() {
       _course = courseDetails;
+      _isDelegated = isDelegated;
       _students = List<Map<String, dynamic>>.from(studentCourses);
       _students.sort((a, b) {
         final noA = (a['users']?['school_no'] ?? '').toString();
@@ -327,15 +334,33 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
     });
 
     try {
-      final myId = _supabase.auth.currentUser?.id;
-      await _supabase.from('attendance').upsert({
-        'student_id': studentId,
-        'course_id': courseId,
-        'date': dateStr,
-        'slot': _selectedSlot,
-        'is_present': newVal,
-        'taken_by': myId,
-      }, onConflict: 'student_id, course_id, date, slot');
+      final existing = await _supabase
+          .from('attendance')
+          .select('id')
+          .eq('student_id', studentId)
+          .eq('course_id', courseId)
+          .eq('date', dateStr)
+          .eq('slot', _selectedSlot)
+          .maybeSingle();
+
+      if (existing != null) {
+        await _supabase
+            .from('attendance')
+            .update({
+              'is_present': newVal,
+            })
+            .eq('id', existing['id']);
+      } else {
+        await _supabase
+            .from('attendance')
+            .insert({
+              'student_id': studentId,
+              'course_id': courseId,
+              'date': dateStr,
+              'slot': _selectedSlot,
+              'is_present': newVal,
+            });
+      }
       if (_sortBy == 'Durum') _sortStudents();
     } catch (e) {
       if (!mounted) return;
@@ -601,6 +626,7 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
         courseId: _course!['id'],
         courseName: _translateCourseName(_course?['course_name']),
         dateStr: dateStr,
+        slot: _selectedSlot,
       ),
     );
   }
@@ -750,6 +776,7 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                             Expanded(
                               child: _AutomationButton(
                                 isActive: _isAutomationRunning,
+                                isEnabled: !_isDelegated,
                                 timer: _automationTimer,
                                 onTap: _startAutomaticAttendance,
                               ),
@@ -761,23 +788,23 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                           children: [
                             Expanded(
                               child: InkWell(
-                                onTap: _showPlannedAttendanceDialog,
+                                onTap: _isDelegated ? null : _showPlannedAttendanceDialog,
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(vertical: 12),
                                   decoration: BoxDecoration(
-                                    color: Colors.white.withValues(alpha: 0.2),
+                                    color: _isDelegated ? Colors.white.withValues(alpha: 0.05) : Colors.white.withValues(alpha: 0.2),
                                     borderRadius: BorderRadius.circular(12),
                                     border: Border.all(
-                                      color: Colors.white.withValues(alpha: 0.3),
+                                      color: _isDelegated ? Colors.white.withValues(alpha: 0.1) : Colors.white.withValues(alpha: 0.3),
                                       width: 1,
                                     ),
                                   ),
                                   child: Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
-                                      const Icon(
+                                      Icon(
                                         Icons.schedule_rounded,
-                                        color: Colors.white,
+                                        color: _isDelegated ? Colors.white54 : Colors.white,
                                         size: 20,
                                       ),
                                       const SizedBox(width: 8),
@@ -785,8 +812,8 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                                         _isIntervalMode && _countdownText.isNotEmpty
                                           ? 'Sonraki: $_countdownText'
                                           : 'Planlı Yoklama Ayarla',
-                                        style: const TextStyle(
-                                          color: Colors.white,
+                                        style: TextStyle(
+                                          color: _isDelegated ? Colors.white54 : Colors.white,
                                           fontWeight: FontWeight.bold,
                                           fontSize: 14,
                                         ),
@@ -803,30 +830,30 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                           children: [
                             Expanded(
                               child: InkWell(
-                                onTap: _showQRCode,
+                                onTap: _isDelegated ? null : _showQRCode,
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(vertical: 12),
                                   decoration: BoxDecoration(
-                                    color: Colors.white.withValues(alpha: 0.2),
+                                    color: _isDelegated ? Colors.white.withValues(alpha: 0.05) : Colors.white.withValues(alpha: 0.2),
                                     borderRadius: BorderRadius.circular(12),
                                     border: Border.all(
-                                      color: Colors.white.withValues(alpha: 0.3),
+                                      color: _isDelegated ? Colors.white.withValues(alpha: 0.1) : Colors.white.withValues(alpha: 0.3),
                                       width: 1,
                                     ),
                                   ),
-                                  child: const Row(
+                                  child: Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
                                       Icon(
                                         Icons.qr_code_2_rounded,
-                                        color: Colors.white,
+                                        color: _isDelegated ? Colors.white54 : Colors.white,
                                         size: 20,
                                       ),
-                                      SizedBox(width: 8),
+                                      const SizedBox(width: 8),
                                       Text(
                                         'QR Oluştur',
                                         style: TextStyle(
-                                          color: Colors.white,
+                                          color: _isDelegated ? Colors.white54 : Colors.white,
                                           fontWeight: FontWeight.bold,
                                           fontSize: 14,
                                         ),
@@ -1507,25 +1534,30 @@ class _StudentItem extends StatelessWidget {
 
 class _AutomationButton extends StatelessWidget {
   final bool isActive;
+  final bool isEnabled;
   final int timer;
   final VoidCallback onTap;
   const _AutomationButton({
     required this.isActive,
+    this.isEnabled = true,
     required this.timer,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
+    final bool effectiveEnabled = isEnabled && !isActive;
     return InkWell(
-      onTap: isActive ? null : onTap,
+      onTap: effectiveEnabled ? onTap : null,
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: BoxDecoration(
-          color: isActive ? Colors.white : Colors.white.withValues(alpha: 0.2),
+          color: isActive 
+              ? Colors.white 
+              : (isEnabled ? Colors.white.withValues(alpha: 0.2) : Colors.white.withValues(alpha: 0.05)),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: Colors.white.withValues(alpha: 0.3),
+            color: isEnabled ? Colors.white.withValues(alpha: 0.3) : Colors.white.withValues(alpha: 0.1),
             width: 1,
           ),
         ),
@@ -1545,7 +1577,9 @@ class _AutomationButton extends StatelessWidget {
                   ? 'Taranıyor... ($timer s)'
                   : 'Otomatik Yoklamayı Başlat',
               style: TextStyle(
-                color: isActive ? AppColors.primary : Colors.white,
+                color: isActive 
+                    ? AppColors.primary 
+                    : (isEnabled ? Colors.white : Colors.white54),
                 fontWeight: FontWeight.bold,
                 fontSize: 14,
               ),
@@ -1561,10 +1595,12 @@ class _QRDisplayDialog extends StatefulWidget {
   final String courseId;
   final String courseName;
   final String dateStr;
+  final int slot;
   const _QRDisplayDialog({
     required this.courseId,
     required this.courseName,
     required this.dateStr,
+    required this.slot,
   });
   @override
   State<_QRDisplayDialog> createState() => _QRDisplayDialogState();
@@ -1577,6 +1613,8 @@ class _QRDisplayDialogState extends State<_QRDisplayDialog> {
   final BeaconBroadcast _beaconBroadcast = BeaconBroadcast();
   bool _isBeaconActive = false;
   String _currentBeaconToken = '';
+  double? _teacherLat;
+  double? _teacherLng;
 
   @override
   void initState() {
@@ -1592,7 +1630,26 @@ class _QRDisplayDialogState extends State<_QRDisplayDialog> {
       Permission.bluetoothConnect,
       Permission.location,
     ].request();
-    if (status.values.every((s) => s.isGranted)) _startBeacon();
+    if (status.values.every((s) => s.isGranted)) {
+      _startBeacon();
+      _getTeacherLocation();
+    }
+  }
+
+  Future<void> _getTeacherLocation() async {
+    try {
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+      setState(() {
+        _teacherLat = position.latitude;
+        _teacherLng = position.longitude;
+      });
+      // Regenerate QR data with location!
+      _generateData();
+    } catch (e) {
+      debugPrint('Location Error: $e');
+    }
   }
 
   void _startBeacon() async {
@@ -1621,9 +1678,12 @@ class _QRDisplayDialogState extends State<_QRDisplayDialog> {
         'type': 'attendance_qr',
         'course_id': widget.courseId,
         'date': widget.dateStr,
+        'slot': widget.slot,
         'timestamp': DateTime.now().millisecondsSinceEpoch,
         'beacon_token': _currentBeaconToken,
         'secure': true,
+        'lat': _teacherLat,
+        'lng': _teacherLng,
       });
       _secondsLeft = 30;
     });

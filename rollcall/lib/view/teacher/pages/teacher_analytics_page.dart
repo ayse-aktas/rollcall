@@ -43,6 +43,7 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
   List<Map<String, dynamic>> _students = [];
   List<DateTime> _allScheduledDates = [];
   Set<String> _selectedStudentIds = {};
+  List<Map<String, dynamic>> _tableColumns = [];
 
   // Stats
   int _totalLectures = 0;
@@ -89,7 +90,7 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
       // sayfanın çökmesini engellemek adına o kısımları sorgudan çıkardık.
       final attendanceRes = await _supabase
           .from('attendance')
-          .select('date, student_id, is_present, slot')
+          .select('date, student_id, is_present, slot, created_at')
           .eq('course_id', courseId)
           .order('date');
 
@@ -110,6 +111,35 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
 
     _totalLectures = _allScheduledDates.length;
     _lecturesHeld = 0;
+
+    // Find all unique (date, time) in attendance records
+    Map<String, Set<String>> dateTimes = {};
+    for (var record in _allAttendanceRecords) {
+      final date = record['date'] as String;
+      final createdAt = record['created_at'] as String?;
+      String time = '-';
+      if (createdAt != null) {
+        final dt = DateTime.parse(createdAt).toLocal();
+        time = DateFormat('HH:mm').format(dt);
+      }
+      dateTimes.putIfAbsent(date, () => {}).add(time);
+    }
+
+    _tableColumns = [];
+    for (var date in _allScheduledDates) {
+      final dateStr = DateFormat('yyyy-MM-dd').format(date);
+      final times = dateTimes[dateStr];
+      if (times != null && times.isNotEmpty) {
+        final sortedTimes = times.toList()..sort();
+        for (var time in sortedTimes) {
+          _tableColumns.add({
+            'date': date,
+            'dateStr': dateStr,
+            'time': time,
+          });
+        }
+      }
+    }
 
     // 4. Group attendance by date for charts
     Map<String, List<bool>> groupedByDate = {};
@@ -439,21 +469,59 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
     ex.Sheet sheetObject = excel['Yoklama Raporu'];
     excel.delete('Sheet1');
 
-    sheetObject.appendRow([
-      ex.TextCellValue('Tarih'),
+    List<ex.CellValue> headerRow = [
       ex.TextCellValue('Okul No'),
       ex.TextCellValue('İsim Soyisim'),
-      ex.TextCellValue('Durum')
-    ]);
+    ];
+    
+    for (var col in _tableColumns) {
+      final date = col['date'] as DateTime;
+      final time = col['time'] as String;
+      final label = time != '-' ? '${DateFormat('dd/MM').format(date)} ($time)' : DateFormat('dd/MM').format(date);
+      headerRow.add(ex.TextCellValue(label));
+    }
+    
+    sheetObject.appendRow(headerRow);
 
-    for (var r in _allAttendanceRecords) {
-      final student = r['users'] as Map<String, dynamic>;
-      sheetObject.appendRow([
-        ex.TextCellValue(r['date'].toString()),
+    for (var studentData in _students) {
+      final student = studentData['users'] as Map<String, dynamic>;
+      final studentId = student['id'];
+      final studentAttendance = _allAttendanceRecords.where((r) => r['student_id'] == studentId).toList();
+      
+      List<ex.CellValue> row = [
         ex.TextCellValue((student['school_no'] ?? '-').toString()),
         ex.TextCellValue('${student['first_name']} ${student['last_name']}'),
-        ex.TextCellValue(r['is_present'] ? 'VAR' : 'YOK')
-      ]);
+      ];
+      
+      for (var col in _tableColumns) {
+        final dateStr = col['dateStr'] as String;
+        final time = col['time'] as String;
+        
+        final records = studentAttendance.where((r) => r['date'] == dateStr).toList();
+        Map<String, dynamic> record = {};
+        if (time == '-') {
+          if (records.isNotEmpty) record = records.first;
+        } else {
+          record = records.firstWhere((r) {
+            final createdAt = r['created_at'] as String?;
+            if (createdAt == null) return false;
+            final dt = DateTime.parse(createdAt).toLocal();
+            return DateFormat('HH:mm').format(dt) == time;
+          }, orElse: () => {});
+        }
+        
+        if (record.isEmpty) {
+          if (col['date'].isBefore(DateTime.now())) {
+            row.add(ex.TextCellValue('YOK'));
+          } else {
+            row.add(ex.TextCellValue('-'));
+          }
+        } else {
+          row.add(ex.TextCellValue(record['is_present'] ? 'VAR' : 'YOK'));
+        }
+      }
+      
+      sheetObject.appendRow(row);
     }
 
     final fileBytes = excel.save();
@@ -688,11 +756,24 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
               DataColumn(
                 label: const SizedBox.shrink(),
               ),
-              ...List.generate(_allScheduledDates.length, (index) {
+              ...List.generate(_tableColumns.length, (index) {
+                final col = _tableColumns[index];
+                final date = col['date'] as DateTime;
+                final time = col['time'] as String;
                 return DataColumn(
-                  label: Text(
-                    DateFormat('dd/MM').format(_allScheduledDates[index]),
-                    style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.textSecondary),
+                  label: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        DateFormat('dd/MM').format(date),
+                        style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.textSecondary),
+                      ),
+                      if (time != '-')
+                        Text(
+                          time,
+                          style: const TextStyle(fontSize: 10, color: AppColors.textSecondary),
+                        ),
+                    ],
                   ),
                 );
               }),
@@ -728,12 +809,25 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
                       ],
                     ),
                   ),
-                  ..._allScheduledDates.map((date) {
-                    final dateStr = DateFormat('yyyy-MM-dd').format(date);
-                    final record = studentAttendance.firstWhere((r) => r['date'] == dateStr, orElse: () => {});
+                  ..._tableColumns.map((col) {
+                    final dateStr = col['dateStr'] as String;
+                    final time = col['time'] as String;
+                    
+                    final records = studentAttendance.where((r) => r['date'] == dateStr).toList();
+                    Map<String, dynamic> record = {};
+                    if (time == '-') {
+                      if (records.isNotEmpty) record = records.first;
+                    } else {
+                      record = records.firstWhere((r) {
+                        final createdAt = r['created_at'] as String?;
+                        if (createdAt == null) return false;
+                        final dt = DateTime.parse(createdAt).toLocal();
+                        return DateFormat('HH:mm').format(dt) == time;
+                      }, orElse: () => {});
+                    }
                     
                     if (record.isEmpty) {
-                      if (date.isBefore(DateTime.now())) {
+                      if (col['date'].isBefore(DateTime.now())) {
                         return const DataCell(Icon(Icons.close_rounded, color: Colors.redAccent, size: 18));
                       }
                       return const DataCell(Text('-', style: TextStyle(color: Colors.grey)));

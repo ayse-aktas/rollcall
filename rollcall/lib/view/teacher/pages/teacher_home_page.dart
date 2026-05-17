@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 import '../../../core/utils/theme/colors/app_colors.dart';
 import 'teacher_delegate_page.dart';
@@ -56,6 +57,9 @@ class _TeacherHomePageState extends State<TeacherHomePage> with SingleTickerProv
   Future<void> _loadData() async {
     final uid = _supabase.auth.currentUser?.id;
     if (uid == null) return;
+
+    // Her kullanıcıyı kendi ID'si ile oluşturulmuş kanala abone yap
+    FirebaseMessaging.instance.subscribeToTopic("user_$uid");
 
     try {
       // 1. Profile

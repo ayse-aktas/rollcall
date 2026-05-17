@@ -10,7 +10,7 @@ void main() async {
   try {
     final res = await supabase
         .from('attendance')
-        .select('date, student_id, is_present, slot, taken_by, users!attendance_taken_by_fkey(first_name, last_name, title)')
+        .select('*')
         .limit(1);
     print('Success: $res');
   } catch (e) {

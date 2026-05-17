@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:intl/intl.dart';
 import '../../../core/utils/theme/colors/app_colors.dart';
 import 'course_attendance_detail_page.dart';
@@ -21,9 +22,6 @@ int getScheduledDaysCount(DateTime start, DateTime end, String courseDayRaw) {
   }
   return count;
 }
-
-// ── Translation Helpers ─────────────────────────────────
-
 
 String _translateCourseName(String? name) {
   const courseMap = {
@@ -87,6 +85,9 @@ class _StudentHomePageState extends State<StudentHomePage> {
   Future<void> _loadData() async {
     final uid = _supabase.auth.currentUser?.id;
     if (uid == null) return;
+
+    // Her kullanıcıyı kendi ID'si ile oluşturulmuş kanala abone yap
+    FirebaseMessaging.instance.subscribeToTopic("user_$uid");
 
     Map<String, dynamic>? profile;
     List<Map<String, dynamic>> enrollments = [];

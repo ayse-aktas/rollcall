@@ -42,7 +42,7 @@ serve(async (req) => {
         },
         body: JSON.stringify({
           message: {
-            topic: "all", // Şimdilik herkese gönderiyoruz test için
+            topic: record.user_id ? `user_${record.user_id}` : "all",
             notification: {
               title: record.message,
             }
