@@ -19,7 +19,7 @@ const char* password   = "esp8266.";
 
 const char* supabaseHost = "vytqqwrcmmjuutysxwxl.supabase.co";
 const char* supabaseKey  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ5dHFxd3JjbW1qdXV0eXN4d3hsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyNTg2ODEsImV4cCI6MjA4OTgzNDY4MX0.aRPGwB93MYCam9gxC_08FDeKY6MQdwui9Mq94PSnFcQ"; 
-const char* classroomId  = "7023ba8c-6535-4185-bf45-c04a8aae8a7e";
+const char* classroomId  = "09d06de4-dec1-4050-81fd-0ced14b5bd46";
 
 const char* ntpServer     = "pool.ntp.org";
 const long  gmtOffset_sec = 10800;           

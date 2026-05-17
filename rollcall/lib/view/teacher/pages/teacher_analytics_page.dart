@@ -48,6 +48,9 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
   int _totalLectures = 0;
   int _lecturesHeld = 0;
 
+  int _currentPage = 0;
+  final int _rowsPerPage = 10;
+
   @override
   void initState() {
     super.initState();
@@ -57,8 +60,9 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
   Future<void> _fetchAnalyticsData() async {
     setState(() => _isLoading = true);
 
-    final courseId = widget.course['id'];
-    final courseDayRaw = widget.course['course_day'] ?? '';
+    try {
+      final courseId = widget.course['id'];
+      final courseDayRaw = widget.course['course_day'] ?? '';
     final List<String> scheduledDays = courseDayRaw
         .toString()
         .toLowerCase()
@@ -81,13 +85,15 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
     _totalStudents = _students.length;
 
     // 2. Fetch all attendance records
-    final attendanceRes = await _supabase
-        .from('attendance')
-        .select('date, student_id, is_present, slot, taken_by, users!attendance_taken_by_fkey(first_name, last_name, title)')
-        .eq('course_id', courseId)
-        .order('date');
+      // NOT: Supabase veritabanında 'taken_by' kolonu ve foreign key henüz tanımlanmadığı için 
+      // sayfanın çökmesini engellemek adına o kısımları sorgudan çıkardık.
+      final attendanceRes = await _supabase
+          .from('attendance')
+          .select('date, student_id, is_present, slot')
+          .eq('course_id', courseId)
+          .order('date');
 
-    _allAttendanceRecords = List<Map<String, dynamic>>.from(attendanceRes);
+      _allAttendanceRecords = List<Map<String, dynamic>>.from(attendanceRes);
 
     // 3. Generate ALL scheduled dates for the term
     _allScheduledDates = [];
@@ -148,13 +154,23 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
       _averageAttendanceRate = totalRateSum / _lecturesHeld;
     }
 
-    if (!mounted) return;
-    setState(() {
-      _heatmapData = heatmap;
-      _trendSpots = spots;
-      _dateLabels = labels;
-      _isLoading = false;
-    });
+      if (!mounted) return;
+      setState(() {
+        _heatmapData = heatmap;
+        _trendSpots = spots;
+        _dateLabels = labels;
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Veriler yüklenirken hata oluştu: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   Future<void> _exportToPDF() async {
@@ -635,6 +651,13 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
   Widget _buildStudentAttendanceTable() {
     if (_students.isEmpty) return const SizedBox();
 
+    final int totalPages = (_students.length / _rowsPerPage).ceil();
+    final int startIndex = _currentPage * _rowsPerPage;
+    final int endIndex = (startIndex + _rowsPerPage > _students.length) 
+        ? _students.length 
+        : startIndex + _rowsPerPage;
+    final paginatedStudents = _students.sublist(startIndex, endIndex);
+
     return Container(
       decoration: BoxDecoration(
         color: AppColors.surface,
@@ -644,9 +667,16 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
         ],
         border: Border.all(color: AppColors.border.withAlpha(5*25)),
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(24),
-        child: SingleChildScrollView(
+      child: Column(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(24),
+              topRight: const Radius.circular(24),
+              bottomLeft: totalPages > 1 ? Radius.zero : const Radius.circular(24),
+              bottomRight: totalPages > 1 ? Radius.zero : const Radius.circular(24),
+            ),
+            child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: DataTable(
             columnSpacing: 24,
@@ -667,7 +697,7 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
                 );
               }),
             ],
-            rows: _students.map((studentData) {
+            rows: paginatedStudents.map((studentData) {
               final student = studentData['users'] as Map<String, dynamic>;
               final studentId = student['id'];
               final isSelected = _selectedStudentIds.contains(studentId);
@@ -722,6 +752,46 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
             }).toList(),
           ),
         ),
+      ),
+          if (totalPages > 1)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              decoration: BoxDecoration(
+                border: Border(top: BorderSide(color: AppColors.border.withAlpha(5*25))),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    '${startIndex + 1}-$endIndex / ${_students.length} Öğrenci',
+                    style: const TextStyle(color: AppColors.textSecondary, fontSize: 13, fontWeight: FontWeight.w500),
+                  ),
+                  Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.chevron_left_rounded, size: 20),
+                        color: AppColors.primary,
+                        onPressed: _currentPage > 0 ? () {
+                          setState(() { _currentPage--; });
+                        } : null,
+                      ),
+                      Text(
+                        '${_currentPage + 1} / $totalPages',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.chevron_right_rounded, size: 20),
+                        color: AppColors.primary,
+                        onPressed: _currentPage < totalPages - 1 ? () {
+                          setState(() { _currentPage++; });
+                        } : null,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+        ],
       ),
     );
   }

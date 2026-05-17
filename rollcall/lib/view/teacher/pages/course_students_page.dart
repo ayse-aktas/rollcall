@@ -588,19 +588,19 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _AutomationButton(
-                              isActive: _isAutomationRunning,
-                              timer: _automationTimer,
-                              onTap: _startAutomaticAttendance,
-                            ),
-                          ),
-                        ],
-                      ),
                       if (_canOpenQR()) ...[
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _AutomationButton(
+                                isActive: _isAutomationRunning,
+                                timer: _automationTimer,
+                                onTap: _startAutomaticAttendance,
+                              ),
+                            ),
+                          ],
+                        ),
                         const SizedBox(height: 12),
                         Row(
                           children: [
@@ -700,28 +700,6 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                   )
                 : Column(
                     children: [
-                      if (!DateUtils.isSameDay(_selectedDate, DateTime.now()))
-                        Container(
-                          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                          margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: Colors.orange.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.orange.withValues(alpha: 0.2)),
-                          ),
-                          child: const Row(
-                            children: [
-                              Icon(Icons.info_outline_rounded, color: Colors.orange, size: 16),
-                              SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  'Sadece görüntüleme modundasınız. Geçmiş/gelecek yoklamalar değiştirilemez.',
-                                  style: TextStyle(color: Colors.orange, fontSize: 11, fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
                       _buildHeaderStats(),
                       Expanded(
                         child: ListView.builder(
@@ -803,12 +781,18 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
               setState(() => _sortBy = value);
               _sortStudents();
             },
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            color: Colors.white,
+            elevation: 10,
             itemBuilder: (context) => [
               'Okul No',
               'İsim Soyisim',
               'Durum',
             ].map((s) => PopupMenuItem(
               value: s,
+              height: 40,
               child: Row(
                 children: [
                   Icon(
@@ -819,30 +803,40 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                     color: _sortBy == s ? AppColors.primary : AppColors.textSecondary,
                   ),
                   const SizedBox(width: 10),
-                  Text(s, style: TextStyle(
-                    color: _sortBy == s ? AppColors.primary : AppColors.textPrimary,
-                    fontWeight: _sortBy == s ? FontWeight.bold : FontWeight.normal,
-                  )),
+                  Text(
+                    s,
+                    style: TextStyle(
+                      color: _sortBy == s ? AppColors.primary : AppColors.textPrimary,
+                      fontWeight: _sortBy == s ? FontWeight.bold : FontWeight.normal,
+                      fontSize: 13,
+                    ),
+                  ),
+                  const Spacer(),
+                  if (_sortBy == s)
+                    const Icon(Icons.check_circle_rounded, color: AppColors.primary, size: 16),
                 ],
               ),
             )).toList(),
-            child: Row(
-              children: [
-                Text(
-                  'Sırala: $_sortBy',
-                  style: const TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              child: Row(
+                children: [
+                  Text(
+                    'Sırala: $_sortBy',
+                    style: const TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                ),
-                const SizedBox(width: 4),
-                const Icon(
-                  Icons.sort_rounded,
-                  size: 14,
-                  color: AppColors.textSecondary,
-                ),
-              ],
+                  const SizedBox(width: 4),
+                  const Icon(
+                    Icons.sort_rounded,
+                    size: 16,
+                    color: AppColors.textSecondary,
+                  ),
+                ],
+              ),
             ),
           ),
         ],
