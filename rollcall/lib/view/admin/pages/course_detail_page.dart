@@ -521,8 +521,11 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
           )),
     ];
 
+    // Değer listede yoksa (veriler yüklenirken) hata vermemesi için null yapıyoruz
+    final hasValue = items.any((item) => item.value == value);
+
     return DropdownButtonFormField<String>(
-      value: value,
+      value: hasValue ? value : null,
       decoration: InputDecoration(
         labelText: label,
         filled: true,

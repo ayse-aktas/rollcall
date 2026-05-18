@@ -34,7 +34,7 @@ class _AdminPageState extends State<AdminPage> {
   Future<void> _loadStats() async {
     final users = await _supabase
         .from('users')
-        .select('id, first_name, last_name, school_no, role, email');
+        .select('id, first_name, last_name, school_no, role, email, title');
     final courses = await _supabase
         .from('courses')
         .select(

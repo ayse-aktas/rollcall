@@ -3,12 +3,13 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/utils/theme/colors/app_colors.dart';
 
 const List<String> kAcademicTitles = [
-  'Prof.Dr.',
-  'Doç.Dr.',
-  'Dr.Öğr.Üyesi',
-  'Öğr.Gör.',
-  'Arş.Gör.',
+  'Prof. Dr.',
+  'Doç. Dr.',
+  'Dr. Öğr. Üyesi',
+  'Öğr. Gör.',
+  'Arş. Gör.',
   'Dr.',
+  'Öğr. Gör. Dr.',
   '-',
 ];
 
@@ -23,61 +24,73 @@ class UserDetailPage extends StatefulWidget {
 class _UserDetailPageState extends State<UserDetailPage> {
   final _supabase = Supabase.instance.client;
   List<Map<String, dynamic>> _studentCourses = [];
+  List<Map<String, dynamic>> _teacherCourses = [];
+  List<Map<String, dynamic>> _allTeachers = [];
   bool _isLoading = true;
+  bool _isEditing = false;
   String? _selectedTitle;
+  String? _selectedRole;
+  
+  late TextEditingController _emailC;
+  late TextEditingController _schoolNoC;
 
   @override
   void initState() {
     super.initState();
     _selectedTitle = widget.user['title'] as String?;
+    _selectedRole = widget.user['role'] as String?;
+    _emailC = TextEditingController(text: widget.user['email']);
+    _schoolNoC = TextEditingController(text: widget.user['school_no']?.toString() ?? '');
     _loadData();
   }
 
   Future<void> _loadData() async {
     try {
-      final res = await _supabase
-          .from('student_courses')
-          .select('*, courses(*)')
-          .eq('student_id', widget.user['id']);
+      // Öğrenci ise kayıtlı derslerini çek
+      if (widget.user['role'] == 'student') {
+        final res = await _supabase
+            .from('student_courses')
+            .select('*, courses(*)')
+            .eq('student_id', widget.user['id']);
+        _studentCourses = List<Map<String, dynamic>>.from(res);
+      }
+
+      // Hoca ise verdiği dersleri çek
+      if (widget.user['role'] == 'teacher') {
+        final res = await _supabase
+            .from('courses')
+            .select('*')
+            .or('teacher_id.eq.${widget.user['id']},assigned_teacher_id.eq.${widget.user['id']}');
+        _teacherCourses = List<Map<String, dynamic>>.from(res);
+      }
+
+      // Tüm hocaları çek (Ders devri için)
+      final teachersRes = await _supabase
+          .from('users')
+          .select('id, first_name, last_name, title')
+          .eq('role', 'teacher')
+          .neq('id', widget.user['id']);
+      _allTeachers = List<Map<String, dynamic>>.from(teachersRes);
 
       if (!mounted) return;
       setState(() {
-        _studentCourses = List<Map<String, dynamic>>.from(res);
         _isLoading = false;
       });
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Dersler getirilemedi: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text('Veriler getirilemedi: $e'), backgroundColor: Colors.red),
         );
         setState(() => _isLoading = false);
       }
     }
   }
 
-  Future<void> _saveTitle(String? title) async {
-    try {
-      await _supabase
-          .from('users')
-          .update({'title': (title == '-' || title == null) ? null : title})
-          .eq('id', widget.user['id']);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Unvan güncellendi'), backgroundColor: AppColors.success),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Hata: $e'), backgroundColor: Colors.red),
-        );
-      }
-    }
-  }
+
 
   @override
   Widget build(BuildContext context) {
-    final isTeacher = widget.user['role'] == 'teacher';
+    final isTeacher = _selectedRole == 'teacher';
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -85,6 +98,18 @@ class _UserDetailPageState extends State<UserDetailPage> {
         backgroundColor: Colors.white,
         foregroundColor: AppColors.textPrimary,
         elevation: 0,
+        actions: [
+          IconButton(
+            icon: Icon(_isEditing ? Icons.save_rounded : Icons.edit_rounded, color: _isEditing ? AppColors.success : AppColors.primary),
+            onPressed: () {
+              if (_isEditing) {
+                _saveUserInfo();
+              } else {
+                setState(() => _isEditing = true);
+              }
+            },
+          ),
+        ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -95,11 +120,17 @@ class _UserDetailPageState extends State<UserDetailPage> {
                 children: [
                   _buildProfileSection(isTeacher),
                   const SizedBox(height: 24),
-                  if (widget.user['role'] == 'student') ...[
+                  if (_selectedRole == 'student') ...[
                     const Text('Kayıtlı Dersler',
                         style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 12),
                     ..._studentCourses.map((sc) => _buildCourseCard(sc)),
+                  ],
+                  if (_selectedRole == 'teacher') ...[
+                    const Text('Verdiği Dersler',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 12),
+                    ..._teacherCourses.map((c) => _buildTeacherCourseCard(c)),
                   ],
                 ],
               ),
@@ -117,9 +148,15 @@ class _UserDetailPageState extends State<UserDetailPage> {
       ),
       child: Column(
         children: [
-          _buildInfoRow(Icons.email_outlined, 'E-posta', widget.user['email'] ?? '-'),
-          _buildInfoRow(Icons.badge_outlined, 'Okul No', widget.user['school_no']?.toString() ?? '-'),
-          _buildInfoRow(Icons.person_outline, 'Rol', _roleLabel(widget.user['role'])),
+          _isEditing
+              ? _buildEditableRow(Icons.email_outlined, 'E-posta', _emailC)
+              : _buildInfoRow(Icons.email_outlined, 'E-posta', _emailC.text),
+          _isEditing
+              ? _buildEditableRow(Icons.badge_outlined, 'Okul No', _schoolNoC)
+              : _buildInfoRow(Icons.badge_outlined, 'Okul No', _schoolNoC.text),
+          _isEditing
+              ? _buildRoleDropdown()
+              : _buildInfoRow(Icons.person_outline, 'Rol', _roleLabel(_selectedRole)),
           if (isTeacher) ...[
             const Divider(height: 24),
             Row(
@@ -139,10 +176,9 @@ class _UserDetailPageState extends State<UserDetailPage> {
                   items: kAcademicTitles
                       .map((t) => DropdownMenuItem(value: t, child: Text(t)))
                       .toList(),
-                  onChanged: (v) {
+                  onChanged: _isEditing ? (v) {
                     setState(() => _selectedTitle = v);
-                    _saveTitle(v);
-                  },
+                  } : null,
                 ),
               ],
             ),
@@ -172,6 +208,282 @@ class _UserDetailPageState extends State<UserDetailPage> {
           const Spacer(),
           Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),
         ],
+      ),
+    );
+  }
+
+  Widget _buildEditableRow(IconData icon, String label, TextEditingController controller) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Icon(icon, size: 20, color: AppColors.primary),
+          const SizedBox(width: 12),
+          Text(label, style: const TextStyle(color: AppColors.textSecondary)),
+          const SizedBox(width: 24),
+          Expanded(
+            child: TextField(
+              controller: controller,
+              decoration: const InputDecoration(
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(vertical: 8),
+              ),
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRoleDropdown() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          const Icon(Icons.person_outline, size: 20, color: AppColors.primary),
+          const SizedBox(width: 12),
+          const Text('Rol', style: TextStyle(color: AppColors.textSecondary)),
+          const Spacer(),
+          DropdownButton<String>(
+            value: _selectedRole,
+            underline: const SizedBox(),
+            style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+            items: const [
+              DropdownMenuItem(value: 'student', child: Text('Öğrenci')),
+              DropdownMenuItem(value: 'teacher', child: Text('Öğretim Elemanı')),
+              DropdownMenuItem(value: 'admin', child: Text('Yönetici')),
+            ],
+            onChanged: (v) {
+              if (v != null) {
+                setState(() => _selectedRole = v);
+              }
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTeacherCourseCard(Map<String, dynamic> course) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: ListTile(
+        title: Text(course['course_name'] ?? 'İsimsiz Ders'),
+        subtitle: Text('${course['course_code'] ?? '-'} · ${course['course_day'] ?? '-'} ${course['course_time'] ?? ''}'),
+        trailing: ElevatedButton.icon(
+          onPressed: () => _showReassignDialog(course),
+          icon: const Icon(Icons.swap_horiz_rounded, size: 16),
+          label: const Text('Ata'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.primary.withOpacity(0.1),
+            foregroundColor: AppColors.primary,
+            elevation: 0,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _saveUserInfo() async {
+    // Validasyonlar
+    final email = _emailC.text.trim();
+    final schoolNo = _schoolNoC.text.trim();
+
+    if (email.isEmpty || schoolNo.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('E-posta ve Okul No boş bırakılamaz!'), backgroundColor: Colors.red),
+      );
+      return;
+    }
+
+    if (_selectedRole == 'teacher' && !schoolNo.startsWith('t')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Hoca okul numarası "t" ile başlamalıdır!'), backgroundColor: Colors.red),
+      );
+      return;
+    }
+
+    // Rol değişikliği kontrolü
+    if (widget.user['role'] == 'teacher' && _selectedRole != 'teacher' && _teacherCourses.isNotEmpty) {
+      await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('⚠️ Dikkat'),
+          content: const Text('Bu hocanın üzerinde aktif dersler bulunmaktadır. Rolü değiştirmeden önce lütfen dersleri başka akademisyenlere atayın.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Tamam')),
+          ],
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      // Okul no benzersizlik kontrolü
+      final existing = await _supabase
+          .from('users')
+          .select('id')
+          .eq('school_no', schoolNo)
+          .neq('id', widget.user['id']);
+
+      if (existing.isNotEmpty) {
+        throw 'Bu okul numarası başka bir kullanıcı tarafından kullanılıyor!';
+      }
+
+      await _supabase.from('users').update({
+        'email': email,
+        'school_no': schoolNo,
+        'role': _selectedRole,
+        'title': _selectedTitle == '-' ? null : _selectedTitle,
+      }).eq('id', widget.user['id']);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Kullanıcı bilgileri güncellendi'), backgroundColor: AppColors.success),
+        );
+        setState(() {
+          _isEditing = false;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Hata: $e'), backgroundColor: Colors.red),
+        );
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  String _teacherLabel(Map<String, dynamic> t) {
+    final title = t['title'] != null ? '${t['title']} ' : '';
+    return '$title${t['first_name']} ${t['last_name']}';
+  }
+
+  int _timeToMinutes(String timeStr) {
+    final parts = timeStr.split(':');
+    if (parts.length < 2) return 0;
+    return int.parse(parts[0]) * 60 + int.parse(parts[1]);
+  }
+
+  void _showReassignDialog(Map<String, dynamic> course) {
+    String? selectedTeacherId;
+    
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDState) => AlertDialog(
+          title: const Text('Dersi Başkasına Ata'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('"${course['course_name']}" dersini kime atamak istiyorsunuz?'),
+              const SizedBox(height: 12),
+              DropdownButton<String>(
+                value: selectedTeacherId,
+                hint: const Text('Hoca Seçin'),
+                isExpanded: true,
+                items: _allTeachers.map((t) => DropdownMenuItem(
+                  value: t['id'].toString(),
+                  child: Text(_teacherLabel(t)),
+                )).toList(),
+                onChanged: (v) => setDState(() => selectedTeacherId = v),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('İptal')),
+            ElevatedButton(
+              onPressed: () async {
+                if (selectedTeacherId == null) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Lütfen bir hoca seçin!'), backgroundColor: Colors.red),
+                  );
+                  return;
+                }
+                
+                final targetTeacherId = selectedTeacherId!;
+                final courseDay = course['course_day'] as String?;
+                final courseTime = course['course_time'] as String?;
+                final courseEndTime = course['course_end_time'] as String?;
+                
+                if (courseDay != null && courseTime != null && courseEndTime != null) {
+                  final targetCourses = await _supabase
+                      .from('courses')
+                      .select('course_name, course_time, course_end_time')
+                      .or('teacher_id.eq.$targetTeacherId,assigned_teacher_id.eq.$targetTeacherId')
+                      .eq('course_day', courseDay);
+                      
+                  bool hasOverlap = false;
+                  String conflictCourseName = '';
+                  
+                  final currentStart = _timeToMinutes(courseTime);
+                  final currentEnd = _timeToMinutes(courseEndTime);
+                  
+                  for (var tc in targetCourses) {
+                    final otherStartStr = tc['course_time'] as String?;
+                    final otherEndStr = tc['course_end_time'] as String?;
+                    
+                    if (otherStartStr == null || otherEndStr == null) continue;
+                    
+                    final otherStart = _timeToMinutes(otherStartStr);
+                    final otherEnd = _timeToMinutes(otherEndStr);
+                    
+                    if (currentStart < otherEnd && currentEnd > otherStart) {
+                      hasOverlap = true;
+                      conflictCourseName = tc['course_name'] ?? 'Bilinmeyen Ders';
+                      break;
+                    }
+                  }
+                  
+                  if (hasOverlap) {
+                    final bool? proceed = await showDialog<bool>(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: const Text('⚠️ Çakışma Uyarısı'),
+                        content: Text('Bu hocanın o gün ve saatte "$conflictCourseName" dersi bulunmaktadır. Yine de devam etmek istiyor musunuz?'),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Hayır, İptal')),
+                          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Evet, Devam Et')),
+                        ],
+                      ),
+                    );
+                    
+                    if (proceed != true) return;
+                  }
+                }
+                
+                try {
+                  await _supabase
+                      .from('courses')
+                      .update({'teacher_id': targetTeacherId})
+                      .eq('id', course['id']);
+                      
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Ders başarıyla devredildi'), backgroundColor: AppColors.success),
+                    );
+                    Navigator.pop(context);
+                    _loadData();
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Hata: $e'), backgroundColor: Colors.red),
+                    );
+                  }
+                }
+              },
+              child: const Text('Ata'),
+            ),
+          ],
+        ),
       ),
     );
   }
