@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:intl/intl.dart';
 
 import '../../core/utils/theme/colors/app_colors.dart';
 import 'pages/user_detail_page.dart';
@@ -31,8 +32,14 @@ class _AdminPageState extends State<AdminPage> {
   }
 
   Future<void> _loadStats() async {
-    final users = await _supabase.from('users').select('id, first_name, last_name, school_no, role, email');
-    final courses = await _supabase.from('courses').select('id, course_name, course_code, teacher_id, users(first_name, last_name)');
+    final users = await _supabase
+        .from('users')
+        .select('id, first_name, last_name, school_no, role, email');
+    final courses = await _supabase
+        .from('courses')
+        .select(
+          '*, users!teacher_id(first_name, last_name)',
+        );
     final supportRequests = await _supabase
         .from('support_requests')
         .select('*')
@@ -58,15 +65,17 @@ class _AdminPageState extends State<AdminPage> {
     return Scaffold(
       backgroundColor: AppColors.background,
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+          ? const Center(
+              child: CircularProgressIndicator(color: AppColors.primary),
+            )
           : IndexedStack(
               index: _currentIndex,
               children: [
-          _buildDashboard(),
-          _buildUserManagement(),
-          _buildCourseManagement(),
-        ],
-      ),
+                _buildDashboard(),
+                _buildUserManagement(),
+                _buildCourseManagement(),
+              ],
+            ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         onTap: (i) => setState(() => _currentIndex = i),
@@ -74,9 +83,18 @@ class _AdminPageState extends State<AdminPage> {
         selectedItemColor: AppColors.primary,
         unselectedItemColor: AppColors.textSecondary,
         items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.dashboard_rounded), label: 'Panel'),
-          BottomNavigationBarItem(icon: Icon(Icons.people_rounded), label: 'Kullanıcılar'),
-          BottomNavigationBarItem(icon: Icon(Icons.book_rounded), label: 'Dersler'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.dashboard_rounded),
+            label: 'Panel',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.people_rounded),
+            label: 'Kullanıcılar',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.book_rounded),
+            label: 'Dersler',
+          ),
         ],
       ),
     );
@@ -96,14 +114,21 @@ class _AdminPageState extends State<AdminPage> {
               const SizedBox(height: 28),
               const Text(
                 'Destek Talepleri',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textPrimary,
+                ),
               ),
               const SizedBox(height: 16),
               if (_supportRequests.isEmpty)
                 const Center(
                   child: Padding(
                     padding: EdgeInsets.only(top: 40),
-                    child: Text('Henüz bir destek talebi bulunmuyor.', style: TextStyle(color: AppColors.textSecondary)),
+                    child: Text(
+                      'Henüz bir destek talebi bulunmuyor.',
+                      style: TextStyle(color: AppColors.textSecondary),
+                    ),
                   ),
                 )
               else
@@ -128,13 +153,20 @@ class _AdminPageState extends State<AdminPage> {
                             Expanded(
                               child: Text(
                                 req['full_name'] ?? 'İsimsiz',
-                                style: const TextStyle(fontWeight: FontWeight.bold),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                             ),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
                               decoration: BoxDecoration(
-                                color: isReplied ? AppColors.success.withValues(alpha: 0.1) : AppColors.warning.withValues(alpha: 0.1),
+                                color: isReplied
+                                    ? AppColors.success.withValues(alpha: 0.1)
+                                    : AppColors.warning.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Text(
@@ -142,7 +174,9 @@ class _AdminPageState extends State<AdminPage> {
                                 style: TextStyle(
                                   fontSize: 10,
                                   fontWeight: FontWeight.bold,
-                                  color: isReplied ? AppColors.success : AppColors.warning,
+                                  color: isReplied
+                                      ? AppColors.success
+                                      : AppColors.warning,
                                 ),
                               ),
                             ),
@@ -156,12 +190,21 @@ class _AdminPageState extends State<AdminPage> {
                               req['issue'] ?? '',
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(color: AppColors.textSecondary),
+                              style: const TextStyle(
+                                color: AppColors.textSecondary,
+                              ),
                             ),
                             const SizedBox(height: 8),
                             Text(
-                              req['created_at'] != null ? DateTime.parse(req['created_at']).toLocal().toString().split('.')[0] : '',
-                              style: const TextStyle(fontSize: 10, color: AppColors.textSecondary),
+                              req['created_at'] != null
+                                  ? DateTime.parse(
+                                      req['created_at'],
+                                    ).toLocal().toString().split('.')[0]
+                                  : '',
+                              style: const TextStyle(
+                                fontSize: 10,
+                                color: AppColors.textSecondary,
+                              ),
                             ),
                           ],
                         ),
@@ -182,17 +225,35 @@ class _AdminPageState extends State<AdminPage> {
     return Row(
       children: [
         Container(
-          width: 44, height: 44,
-          decoration: BoxDecoration(color: AppColors.surfaceLight, borderRadius: BorderRadius.circular(12)),
-          child: const Icon(Icons.admin_panel_settings_outlined, color: AppColors.primary, size: 22),
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: AppColors.surfaceLight,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: const Icon(
+            Icons.admin_panel_settings_outlined,
+            color: AppColors.primary,
+            size: 22,
+          ),
         ),
         const SizedBox(width: 12),
         const Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Yönetim Paneli', style: TextStyle(color: AppColors.textPrimary, fontSize: 18, fontWeight: FontWeight.w700)),
-              Text('BEACONTrack', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+              Text(
+                'Yönetim Paneli',
+                style: TextStyle(
+                  color: AppColors.textPrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              Text(
+                'BEACONTrack',
+                style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+              ),
             ],
           ),
         ),
@@ -211,9 +272,13 @@ class _AdminPageState extends State<AdminPage> {
 
   Widget _buildUserManagement() {
     final filtered = _allUsers.where((u) {
-      final matchesSearch = '${u['first_name']} ${u['last_name']}'.toLowerCase().contains(_userSearchQuery.toLowerCase()) ||
-                            (u['school_no']?.toString() ?? '').contains(_userSearchQuery);
-      final matchesRole = _selectedRoleFilter == 'all' || u['role'] == _selectedRoleFilter;
+      final matchesSearch =
+          '${u['first_name']} ${u['last_name']}'.toLowerCase().contains(
+            _userSearchQuery.toLowerCase(),
+          ) ||
+          (u['school_no']?.toString() ?? '').contains(_userSearchQuery);
+      final matchesRole =
+          _selectedRoleFilter == 'all' || u['role'] == _selectedRoleFilter;
       return matchesSearch && matchesRole;
     }).toList();
 
@@ -226,7 +291,9 @@ class _AdminPageState extends State<AdminPage> {
               decoration: InputDecoration(
                 hintText: 'İsim veya No ile Ara...',
                 prefixIcon: const Icon(Icons.search),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
                 filled: true,
                 fillColor: Colors.white,
               ),
@@ -240,7 +307,7 @@ class _AdminPageState extends State<AdminPage> {
               children: [
                 _buildFilterChip('Hepsi', 'all'),
                 _buildFilterChip('Öğrenciler', 'student'),
-                _buildFilterChip('Hocalar', 'teacher'),
+                _buildFilterChip('Öğretmenler', 'teacher'),
                 _buildFilterChip('Adminler', 'admin'),
               ],
             ),
@@ -255,11 +322,22 @@ class _AdminPageState extends State<AdminPage> {
                   final u = filtered[i];
                   return ListTile(
                     leading: CircleAvatar(
-                      backgroundColor: u['role'] == 'teacher' ? AppColors.success : (u['role'] == 'admin' ? AppColors.warning : AppColors.primary),
-                      child: Text(u['role']?[0].toUpperCase() ?? 'U', style: const TextStyle(color: Colors.white)),
+                      backgroundColor: u['role'] == 'teacher'
+                          ? AppColors.success
+                          : (u['role'] == 'admin'
+                                ? AppColors.warning
+                                : AppColors.primary),
+                      child: Text(
+                        u['role']?[0].toUpperCase() ?? 'U',
+                        style: const TextStyle(color: Colors.white),
+                      ),
                     ),
-                    title: Text('${u['first_name'] ?? 'İsimsiz'} ${u['last_name'] ?? ''}'),
-                    subtitle: Text('${u['school_no'] ?? '-'} · ${u['role'] ?? 'Rol Yok'}'),
+                    title: Text(
+                      '${u['first_name'] ?? 'İsimsiz'} ${u['last_name'] ?? ''}',
+                    ),
+                    subtitle: Text(
+                      '${u['school_no'] ?? '-'} · ${u['role'] ?? 'Rol Yok'}',
+                    ),
                     trailing: const Icon(Icons.chevron_right_rounded),
                     onTap: () => _openUserDetail(u),
                   );
@@ -291,11 +369,40 @@ class _AdminPageState extends State<AdminPage> {
           if (selected) setState(() => _selectedRoleFilter = value);
         },
         selectedColor: AppColors.primary.withValues(alpha: 0.2),
-        labelStyle: TextStyle(color: isSelected ? AppColors.primary : AppColors.textSecondary),
+        labelStyle: TextStyle(
+          color: isSelected ? AppColors.primary : AppColors.textSecondary,
+        ),
       ),
     );
   }
 
+  bool _isCourseActive(Map<String, dynamic> course) {
+    final day = course['course_day'] as String?;
+    final timeStr = course['course_time'] as String?;
+    final endTimeStr = course['course_end_time'] as String?;
+
+    if (day == null || timeStr == null || endTimeStr == null) return false;
+
+    final now = DateTime.now();
+    final currentDayEnglish = DateFormat('EEEE').format(now);
+
+    if (day.toLowerCase() != currentDayEnglish.toLowerCase()) return false;
+
+    final timeParts = timeStr.split(':');
+    final endTimeParts = endTimeStr.split(':');
+
+    if (timeParts.length < 2 || endTimeParts.length < 2) return false;
+
+    final startTime = TimeOfDay(hour: int.parse(timeParts[0]), minute: int.parse(timeParts[1]));
+    final endTime = TimeOfDay(hour: int.parse(endTimeParts[0]), minute: int.parse(endTimeParts[1]));
+    final currentTime = TimeOfDay.fromDateTime(now);
+
+    final startMinutes = startTime.hour * 60 + startTime.minute;
+    final endMinutes = endTime.hour * 60 + endTime.minute;
+    final currentMinutes = currentTime.hour * 60 + currentTime.minute;
+
+    return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
+  }
 
   Widget _buildCourseManagement() {
     return SafeArea(
@@ -307,10 +414,13 @@ class _AdminPageState extends State<AdminPage> {
             itemCount: _allCourses.length,
             itemBuilder: (context, i) {
               final c = _allCourses[i];
+              final isActive = _isCourseActive(c);
               return Card(
                 margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                color: isActive ? Colors.lightBlue[50] : null,
                 child: ListTile(
                   title: Text(c['course_name'] ?? 'İsimsiz Ders'),
+                  subtitle: isActive ? const Text('Şu an aktif', style: TextStyle(color: Colors.lightBlue, fontSize: 12, fontWeight: FontWeight.bold)) : null,
                   trailing: const Icon(Icons.chevron_right_rounded),
                   onTap: () => _openCourseDetail(c),
                 ),
@@ -341,47 +451,75 @@ class _AdminPageState extends State<AdminPage> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextField(controller: nameC, decoration: const InputDecoration(labelText: 'Ders Adı')),
-                TextField(controller: codeC, decoration: const InputDecoration(labelText: 'Ders Kodu')),
+                TextField(
+                  controller: nameC,
+                  decoration: const InputDecoration(labelText: 'Ders Adı'),
+                ),
+                TextField(
+                  controller: codeC,
+                  decoration: const InputDecoration(labelText: 'Ders Kodu'),
+                ),
                 const Divider(),
-                const Text('Öğretmen Seçin', style: TextStyle(fontWeight: FontWeight.bold)),
+                const Text(
+                  'Öğretmen Seçin',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
                 DropdownButton<String>(
                   value: selectedTeacherId,
                   hint: const Text('Hoca Seçin'),
                   isExpanded: true,
-                  items: _allUsers.where((u) => u['role'] == 'teacher').map((u) => DropdownMenuItem(
-                    value: u['id'].toString(),
-                    child: Text('${u['first_name']} ${u['last_name']}'),
-                  )).toList(),
+                  items: _allUsers
+                      .where((u) => u['role'] == 'teacher')
+                      .map(
+                        (u) => DropdownMenuItem(
+                          value: u['id'].toString(),
+                          child: Text('${u['first_name']} ${u['last_name']}'),
+                        ),
+                      )
+                      .toList(),
                   onChanged: (v) => setDState(() => selectedTeacherId = v),
                 ),
                 const SizedBox(height: 12),
-                const Text('Ders Günü', style: TextStyle(fontWeight: FontWeight.bold)),
+                const Text(
+                  'Ders Günü',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
                 DropdownButton<String>(
                   value: day,
                   isExpanded: true,
-                  items: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map((d) => DropdownMenuItem(value: d, child: Text(d))).toList(),
+                  items:
+                      ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
+                          .map(
+                            (d) => DropdownMenuItem(value: d, child: Text(d)),
+                          )
+                          .toList(),
                   onChanged: (v) => setDState(() => day = v!),
                 ),
               ],
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('İptal')),
-            ElevatedButton(onPressed: () async {
-              if (nameC.text.isEmpty || selectedTeacherId == null) return;
-              
-              await _supabase.from('courses').insert({
-                'course_name': nameC.text,
-                'course_code': codeC.text,
-                'teacher_id': selectedTeacherId,
-                'course_day': day,
-                'course_time': '09:00:00',
-              });
-              
-              Navigator.pop(context);
-              _loadStats();
-            }, child: const Text('Oluştur')),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('İptal'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                if (nameC.text.isEmpty || selectedTeacherId == null) return;
+
+                await _supabase.from('courses').insert({
+                  'course_name': nameC.text,
+                  'course_code': codeC.text,
+                  'teacher_id': selectedTeacherId,
+                  'course_day': day,
+                  'course_time': '09:00:00',
+                });
+
+                Navigator.pop(context);
+                _loadStats();
+              },
+              child: const Text('Oluştur'),
+            ),
           ],
         ),
       ),
