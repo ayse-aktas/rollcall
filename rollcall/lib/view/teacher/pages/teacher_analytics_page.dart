@@ -138,6 +138,13 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
             'time': time,
           });
         }
+      } else {
+        // No attendance taken on this day
+        _tableColumns.add({
+          'date': date,
+          'dateStr': dateStr,
+          'time': '-',
+        });
       }
     }
 
@@ -208,22 +215,66 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
     final font = await PdfGoogleFonts.robotoRegular();
     final boldFont = await PdfGoogleFonts.robotoBold();
     
-    // For general report, we fetch all users details for the records if they are missing
-    // In our new fetch we only get student_id in _allAttendanceRecords for performance, 
-    // but the general report needs names.
-    // Let's create a map for student details
-    final studentMap = {for (var s in _students) s['student_id']: s['users']};
+    // Build headers
+    final List<String> headers = ['Okul No', 'İsim Soyisim'];
+    for (var col in _tableColumns) {
+      final date = col['date'] as DateTime;
+      final time = col['time'] as String;
+      headers.add(time != '-' ? '${DateFormat('dd/MM').format(date)}\n($time)' : DateFormat('dd/MM').format(date));
+    }
+
+    // Build data rows
+    final List<List<String>> data = [];
+    for (var studentData in _students) {
+      final student = studentData['users'] as Map<String, dynamic>;
+      final studentId = student['id'];
+      final studentAttendance = _allAttendanceRecords.where((r) => r['student_id'] == studentId).toList();
+      
+      final List<String> row = [
+        student['school_no'] ?? '-',
+        '${student['first_name']} ${student['last_name']}',
+      ];
+      
+      for (var col in _tableColumns) {
+        final dateStr = col['dateStr'] as String;
+        final time = col['time'] as String;
+        
+        final records = studentAttendance.where((r) => r['date'] == dateStr).toList();
+        Map<String, dynamic> record = {};
+        if (time == '-') {
+          if (records.isNotEmpty) record = records.first;
+        } else {
+          record = records.firstWhere((r) {
+            final createdAt = r['created_at'] as String?;
+            if (createdAt == null) return false;
+            final dt = DateTime.parse(createdAt).toLocal();
+            return DateFormat('HH:mm').format(dt) == time;
+          }, orElse: () => {});
+        }
+        
+        if (record.isEmpty) {
+          if (col['date'].isBefore(DateTime.now())) {
+            row.add('X'); // Absent
+          } else {
+            row.add('-'); // Future
+          }
+        } else {
+          row.add(record['is_present'] == true ? 'V' : 'X');
+        }
+      }
+      data.add(row);
+    }
 
     pdf.addPage(
       pw.MultiPage(
-        pageFormat: PdfPageFormat.a4,
+        pageFormat: PdfPageFormat.a4.landscape,
         theme: pw.ThemeData.withFont(base: font, bold: boldFont),
         build: (pw.Context context) => [
           pw.Header(
             level: 0,
             child: pw.Text(
               'Yoklama Raporu - ${widget.course['course_name']}',
-              style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 18),
+              style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 16),
             ),
           ),
           pw.SizedBox(height: 10),
@@ -233,26 +284,10 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
           pw.Text('Yapılan Ders: $_lecturesHeld / $_totalLectures'),
           pw.SizedBox(height: 20),
           pw.TableHelper.fromTextArray(
-            headers: ['Tarih', 'Okul No', 'İsim Soyisim', 'Hoca', 'Durum'],
-            headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10),
-            cellStyle: const pw.TextStyle(fontSize: 9),
-            data: _allAttendanceRecords.map((r) {
-              final student = studentMap[r['student_id']] as Map<String, dynamic>? ?? {};
-              final taker = r['users'] as Map<String, dynamic>?;
-              final takerName = taker != null 
-                ? '${taker['title'] ?? ''} ${taker['first_name']} ${taker['last_name']}'.trim()
-                : '-';
-              final slot = r['slot'] as int? ?? 1;
-              final dateDisplay = '${r['date']}${slot > 1 ? ' ($slot. Ders)' : ''}';
-              
-              return [
-                dateDisplay,
-                student['school_no'] ?? '-',
-                '${student['first_name'] ?? ''} ${student['last_name'] ?? ''}',
-                takerName,
-                r['is_present'] ? 'VAR' : 'YOK',
-              ];
-            }).toList(),
+            headers: headers,
+            data: data,
+            headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 6),
+            cellStyle: const pw.TextStyle(fontSize: 6),
           ),
         ],
       ),
@@ -299,31 +334,57 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
             pw.Text('Rapor Tarihi: ${DateFormat('dd.MM.yyyy').format(DateTime.now())}'),
             pw.SizedBox(height: 20),
             pw.TableHelper.fromTextArray(
-              headers: ['No', 'Okul No', 'İsim Soyisim', ..._allScheduledDates.map((d) => DateFormat('dd/MM').format(d))],
-              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8),
-              cellStyle: const pw.TextStyle(fontSize: 7),
+              headers: [
+                'No', 'Okul No', 'İsim Soyisim',
+                ..._tableColumns.map((col) {
+                  final date = col['date'] as DateTime;
+                  final time = col['time'] as String;
+                  return time != '-' ? '${DateFormat('dd/MM').format(date)}\n($time)' : DateFormat('dd/MM').format(date);
+                })
+              ],
+              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 6),
+              cellStyle: const pw.TextStyle(fontSize: 6),
               headerDecoration: const pw.BoxDecoration(color: PdfColors.grey200),
-              cellAlignment: pw.Alignment.center,
               data: List.generate(selectedStudents.length, (index) {
                 final studentData = selectedStudents[index];
                 final student = studentData['users'] as Map<String, dynamic>;
                 final studentId = student['id'];
                 final studentAttendance = _allAttendanceRecords.where((r) => r['student_id'] == studentId).toList();
                 
-                return [
+                final List<String> row = [
                   (index + 1).toString(),
                   student['school_no'] ?? '-',
                   '${student['first_name']} ${student['last_name']}',
-                  ..._allScheduledDates.map((date) {
-                    final dateStr = DateFormat('yyyy-MM-dd').format(date);
-                    final record = studentAttendance.firstWhere((r) => r['date'] == dateStr, orElse: () => {});
-                    
-                    if (record.isEmpty) {
-                      return date.isBefore(DateTime.now()) ? 'YOK' : '-';
-                    }
-                    return record['is_present'] ? 'VAR' : 'YOK';
-                  }),
                 ];
+                
+                for (var col in _tableColumns) {
+                  final dateStr = col['dateStr'] as String;
+                  final time = col['time'] as String;
+                  
+                  final records = studentAttendance.where((r) => r['date'] == dateStr).toList();
+                  Map<String, dynamic> record = {};
+                  if (time == '-') {
+                    if (records.isNotEmpty) record = records.first;
+                  } else {
+                    record = records.firstWhere((r) {
+                      final createdAt = r['created_at'] as String?;
+                      if (createdAt == null) return false;
+                      final dt = DateTime.parse(createdAt).toLocal();
+                      return DateFormat('HH:mm').format(dt) == time;
+                    }, orElse: () => {});
+                  }
+                  
+                  if (record.isEmpty) {
+                    if (col['date'].isBefore(DateTime.now())) {
+                      row.add('X'); // Absent
+                    } else {
+                      row.add('-'); // Future
+                    }
+                  } else {
+                    row.add(record['is_present'] == true ? 'V' : 'X');
+                  }
+                }
+                return row;
               }),
             ),
           ],
@@ -754,12 +815,37 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
             headingRowColor: WidgetStateProperty.all(AppColors.primary.withAlpha(1*25)),
             columns: [
               DataColumn(
-                label: const SizedBox.shrink(),
+                label: Row(
+                  children: [
+                    const Text('Öğrenci', style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.textSecondary)),
+                    const SizedBox(width: 4),
+                    Tooltip(
+                      message: 'Tüm Sayfalardaki Öğrencileri Seç',
+                      child: InkWell(
+                        onTap: () {
+                          setState(() {
+                            if (_selectedStudentIds.length == _students.length) {
+                              _selectedStudentIds.clear();
+                            } else {
+                              _selectedStudentIds = _students.map((s) => s['student_id'] as String).toSet();
+                            }
+                          });
+                        },
+                        child: Icon(
+                          Icons.select_all_rounded, 
+                          size: 20, 
+                          color: _selectedStudentIds.length == _students.length ? AppColors.primary : AppColors.textSecondary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
               ...List.generate(_tableColumns.length, (index) {
                 final col = _tableColumns[index];
                 final date = col['date'] as DateTime;
                 final time = col['time'] as String;
+                
                 return DataColumn(
                   label: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
