@@ -30,7 +30,12 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
   List<Map<String, dynamic>> _classrooms = [];
   List<Map<String, dynamic>> _sessions = [];
   List<Map<String, dynamic>> _otherCoursesInClassroom = [];
+  List<Map<String, dynamic>> _students = [];
   Set<String> _selectedSessions = {};
+  int _totalLecturesHeld = 0;
+  int _currentPage = 0;
+  final int _rowsPerPage = 5;
+  String _sortBy = 'Okul No';
   bool _isSaving = false;
 
   @override
@@ -50,6 +55,7 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
     _loadClassrooms();
     _loadSessions();
     _loadOtherCourses();
+    _loadStudents();
   }
 
   Future<void> _loadSessions() async {
@@ -82,6 +88,78 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
     } catch (e) {
       print('Oturum yükleme hatası: $e');
     }
+  }
+
+  Future<void> _loadStudents() async {
+    try {
+      final courseId = widget.course['id'];
+      
+      // 1. Fetch students
+      final studentsRes = await _supabase
+          .from('student_courses')
+          .select('student_id, users(id, first_name, last_name, school_no)')
+          .eq('course_id', courseId);
+          
+      // 2. Fetch attendance
+      final attendanceRes = await _supabase
+          .from('attendance')
+          .select('date, student_id, is_present')
+          .eq('course_id', courseId);
+          
+      final students = List<Map<String, dynamic>>.from(studentsRes);
+      final attendance = List<Map<String, dynamic>>.from(attendanceRes);
+      
+      // Calculate stats
+      final uniqueDates = attendance.map((r) => r['date']).toSet();
+      final totalLectures = uniqueDates.length;
+      
+      for (var s in students) {
+        final studentId = s['student_id'];
+        final presentCount = attendance.where((r) => r['student_id'] == studentId && r['is_present'] == true).length;
+        final rate = totalLectures > 0 ? (presentCount / totalLectures) * 100 : 0.0;
+        s['attendance_rate'] = rate;
+        s['present_count'] = presentCount;
+      }
+      
+      // Sort by school_no
+      students.sort((a, b) {
+        final noA = (a['users']?['school_no'] ?? '').toString();
+        final noB = (b['users']?['school_no'] ?? '').toString();
+        return noA.compareTo(noB);
+      });
+      
+      setState(() {
+        _students = students;
+        _totalLecturesHeld = totalLectures;
+      });
+      _sortStudents(); // Apply default sorting
+    } catch (e) {
+      print('Öğrenci yükleme hatası: $e');
+    }
+  }
+
+  void _sortStudents() {
+    setState(() {
+      if (_sortBy == 'Okul No') {
+        _students.sort((a, b) {
+          final noA = (a['users']?['school_no'] ?? '').toString();
+          final noB = (b['users']?['school_no'] ?? '').toString();
+          return noA.compareTo(noB);
+        });
+      } else if (_sortBy == 'İsim Soyisim') {
+        _students.sort((a, b) {
+          final nameA = '${a['users']?['first_name']} ${a['users']?['last_name']}'.toLowerCase();
+          final nameB = '${b['users']?['first_name']} ${b['users']?['last_name']}'.toLowerCase();
+          return nameA.compareTo(nameB);
+        });
+      } else if (_sortBy == 'Katılım Oranı') {
+        _students.sort((a, b) {
+          final rateA = a['attendance_rate'] as double? ?? 0.0;
+          final rateB = b['attendance_rate'] as double? ?? 0.0;
+          return rateB.compareTo(rateA); // Descending
+        });
+      }
+    });
   }
 
   Future<void> _loadTeachers() async {
@@ -262,6 +340,16 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
 
   @override
   Widget build(BuildContext context) {
+    final bool hasChanges = _nameC.text != widget.course['course_name'] ||
+        _codeC.text != widget.course['course_code'] ||
+        _sectionC.text != (widget.course['section'] ?? '') ||
+        _startTimeC.text != (widget.course['course_time'] ?? '') ||
+        _endTimeC.text != (widget.course['course_end_time'] ?? '') ||
+        _selectedTeacherId != widget.course['teacher_id']?.toString() ||
+        _selectedAssignedTeacherId != widget.course['assigned_teacher_id']?.toString() ||
+        _selectedDay != widget.course['course_day'] ||
+        _selectedClassroomId != widget.course['classroom_id']?.toString();
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -275,7 +363,7 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
                 child: Padding(
                     padding: EdgeInsets.all(16),
                     child: CircularProgressIndicator(strokeWidth: 2)))
-          else
+          else if (hasChanges)
             IconButton(icon: const Icon(Icons.check_rounded), onPressed: _saveChanges),
         ],
       ),
@@ -478,6 +566,89 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
                 ),
               ),
             const SizedBox(height: 24),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                _buildSectionHeader('Kayıtlı Öğrenciler'),
+                DropdownButton<String>(
+                  value: _sortBy,
+                  style: const TextStyle(fontSize: 12, color: AppColors.textPrimary),
+                  items: const [
+                    DropdownMenuItem(value: 'Okul No', child: Text('Okul No')),
+                    DropdownMenuItem(value: 'İsim Soyisim', child: Text('İsim Soyisim')),
+                    DropdownMenuItem(value: 'Katılım Oranı', child: Text('Katılım Oranı')),
+                  ],
+                  onChanged: (v) {
+                    if (v != null) {
+                      setState(() => _sortBy = v);
+                      _sortStudents();
+                    }
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (_students.isEmpty)
+              const Text('Bu derse kayıtlı öğrenci bulunmuyor.', style: TextStyle(color: AppColors.textSecondary))
+            else ...[
+              () {
+                final int totalPages = (_students.length / _rowsPerPage).ceil();
+                final int startIndex = _currentPage * _rowsPerPage;
+                final int endIndex = (startIndex + _rowsPerPage > _students.length) 
+                    ? _students.length 
+                    : startIndex + _rowsPerPage;
+                final paginatedStudents = _students.sublist(startIndex, endIndex);
+                
+                return Column(
+                  children: [
+                    ...paginatedStudents.map((s) {
+                      final user = s['users'] as Map<String, dynamic>? ?? {};
+                      final rate = s['attendance_rate'] as double? ?? 0.0;
+                      final presentCount = s['present_count'] as int? ?? 0;
+                      
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: const BorderSide(color: AppColors.border),
+                        ),
+                        child: ListTile(
+                          title: Text('${user['first_name'] ?? 'İsimsiz'} ${user['last_name'] ?? ''}'),
+                          subtitle: Text(user['school_no'] ?? '-'),
+                          trailing: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text('%${rate.toStringAsFixed(1)}', style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.primary)),
+                              Text('$presentCount / $_totalLecturesHeld Ders', style: const TextStyle(fontSize: 10, color: AppColors.textSecondary)),
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
+                    const SizedBox(height: 12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        TextButton.icon(
+                          onPressed: _currentPage > 0 ? () => setState(() => _currentPage--) : null,
+                          icon: const Icon(Icons.chevron_left),
+                          label: const Text('Geri'),
+                        ),
+                        Text('Sayfa ${_currentPage + 1} / $totalPages'),
+                        TextButton.icon(
+                          onPressed: _currentPage < totalPages - 1 ? () => setState(() => _currentPage++) : null,
+                          icon: const Icon(Icons.chevron_right),
+                          label: const Text('İleri'),
+                        ),
+                      ],
+                    ),
+                  ],
+                );
+              }(),
+            ],
+            const SizedBox(height: 24),
           ],
         ),
       ),
@@ -502,6 +673,7 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
           border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
         ),
+        onChanged: (v) => setState(() {}),
       ),
     );
   }

@@ -26,6 +26,7 @@ class _UserDetailPageState extends State<UserDetailPage> {
   List<Map<String, dynamic>> _studentCourses = [];
   List<Map<String, dynamic>> _teacherCourses = [];
   List<Map<String, dynamic>> _allTeachers = [];
+  List<Map<String, dynamic>> _allCourses = [];
   bool _isLoading = true;
   bool _isEditing = false;
   String? _selectedTitle;
@@ -71,6 +72,12 @@ class _UserDetailPageState extends State<UserDetailPage> {
           .eq('role', 'teacher')
           .neq('id', widget.user['id']);
       _allTeachers = List<Map<String, dynamic>>.from(teachersRes);
+
+      // Tüm dersleri çek (Öğrenciye ders ekleme için)
+      final coursesRes = await _supabase
+          .from('courses')
+          .select('id, course_name, course_code');
+      _allCourses = List<Map<String, dynamic>>.from(coursesRes);
 
       if (!mounted) return;
       setState(() {
@@ -121,8 +128,23 @@ class _UserDetailPageState extends State<UserDetailPage> {
                   _buildProfileSection(isTeacher),
                   const SizedBox(height: 24),
                   if (_selectedRole == 'student') ...[
-                    const Text('Kayıtlı Dersler',
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Kayıtlı Dersler',
+                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                        ElevatedButton.icon(
+                          onPressed: _showAddCourseDialog,
+                          icon: const Icon(Icons.add, size: 16),
+                          label: const Text('Ders Ekle'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.primary,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                          ),
+                        ),
+                      ],
+                    ),
                     const SizedBox(height: 12),
                     ..._studentCourses.map((sc) => _buildCourseCard(sc)),
                   ],
@@ -370,6 +392,79 @@ class _UserDetailPageState extends State<UserDetailPage> {
     final parts = timeStr.split(':');
     if (parts.length < 2) return 0;
     return int.parse(parts[0]) * 60 + int.parse(parts[1]);
+  }
+
+  void _showAddCourseDialog() {
+    String? selectedCourseId;
+    
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDState) => AlertDialog(
+          title: const Text('Öğrenciye Ders Ekle'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Eklemek istediğiniz dersi seçin:'),
+              const SizedBox(height: 12),
+              DropdownButton<String>(
+                value: selectedCourseId,
+                hint: const Text('Ders Seçin'),
+                isExpanded: true,
+                items: _allCourses.map((c) => DropdownMenuItem<String>(
+                  value: c['id'].toString(),
+                  child: Text('${c['course_code']} - ${c['course_name']}'),
+                )).toList(),
+                onChanged: (v) => setDState(() => selectedCourseId = v),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('İptal')),
+            ElevatedButton(
+              onPressed: () async {
+                if (selectedCourseId == null) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Lütfen bir ders seçin!'), backgroundColor: Colors.red),
+                  );
+                  return;
+                }
+                
+                final alreadyRegistered = _studentCourses.any((sc) => sc['courses'] != null && sc['courses']['id'] == selectedCourseId);
+                if (alreadyRegistered) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Öğrenci bu derse zaten kayıtlı!'), backgroundColor: Colors.orange),
+                  );
+                  return;
+                }
+                
+                try {
+                  await _supabase.from('student_courses').insert({
+                    'student_id': widget.user['id'],
+                    'course_id': selectedCourseId,
+                  });
+                  
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Ders başarıyla eklendi'), backgroundColor: AppColors.success),
+                    );
+                    Navigator.pop(context);
+                    _loadData();
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Hata: $e'), backgroundColor: Colors.red),
+                    );
+                  }
+                }
+              },
+              child: const Text('Ekle'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _showReassignDialog(Map<String, dynamic> course) {

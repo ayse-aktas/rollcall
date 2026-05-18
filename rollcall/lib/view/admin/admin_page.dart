@@ -76,6 +76,11 @@ class _AdminPageState extends State<AdminPage> {
                 _buildCourseManagement(),
               ],
             ),
+      floatingActionButton: _currentIndex == 1 ? FloatingActionButton(
+        onPressed: _showCreateUserDialog,
+        backgroundColor: AppColors.primary,
+        child: const Icon(Icons.add, color: Colors.white),
+      ) : null,
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         onTap: (i) => setState(() => _currentIndex = i),
@@ -346,6 +351,129 @@ class _AdminPageState extends State<AdminPage> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  void _showCreateUserDialog() {
+    final firstNameC = TextEditingController();
+    final lastNameC = TextEditingController();
+    final emailC = TextEditingController();
+    final schoolNoC = TextEditingController();
+    final passwordC = TextEditingController();
+    String selectedRole = 'student';
+    String? selectedTitle;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDState) => AlertDialog(
+          title: const Text('Yeni Kullanıcı Oluştur'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(controller: firstNameC, decoration: const InputDecoration(labelText: 'Ad')),
+                TextField(controller: lastNameC, decoration: const InputDecoration(labelText: 'Soyad')),
+                TextField(controller: emailC, decoration: const InputDecoration(labelText: 'E-posta')),
+                TextField(controller: schoolNoC, decoration: const InputDecoration(labelText: 'Okul No')),
+                TextField(controller: passwordC, decoration: const InputDecoration(labelText: 'Şifre'), obscureText: true),
+                const SizedBox(height: 12),
+                DropdownButton<String>(
+                  value: selectedRole,
+                  isExpanded: true,
+                  items: const [
+                    DropdownMenuItem(value: 'student', child: Text('Öğrenci')),
+                    DropdownMenuItem(value: 'teacher', child: Text('Hoca')),
+                    DropdownMenuItem(value: 'admin', child: Text('Admin')),
+                  ],
+                  onChanged: (v) => setDState(() {
+                    selectedRole = v!;
+                    if (v != 'teacher') selectedTitle = null;
+                  }),
+                ),
+                if (selectedRole == 'teacher') ...[
+                  const SizedBox(height: 12),
+                  DropdownButton<String>(
+                    value: selectedTitle,
+                    hint: const Text('Akademik Ünvan Seçin'),
+                    isExpanded: true,
+                    items: const [
+                      DropdownMenuItem(value: 'Prof. Dr.', child: Text('Prof. Dr.')),
+                      DropdownMenuItem(value: 'Doç. Dr.', child: Text('Doç. Dr.')),
+                      DropdownMenuItem(value: 'Dr. Öğr. Üyesi', child: Text('Dr. Öğr. Üyesi')),
+                      DropdownMenuItem(value: 'Öğr. Gör.', child: Text('Öğr. Gör.')),
+                      DropdownMenuItem(value: 'Arş. Gör.', child: Text('Arş. Gör.')),
+                      DropdownMenuItem(value: 'Dr.', child: Text('Dr.')),
+                      DropdownMenuItem(value: 'Öğr. Gör. Dr.', child: Text('Öğr. Gör. Dr.')),
+                    ],
+                    onChanged: (v) => setDState(() => selectedTitle = v),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('İptal')),
+            ElevatedButton(
+              onPressed: () async {
+                final email = emailC.text.trim();
+                final password = passwordC.text.trim();
+                final firstName = firstNameC.text.trim();
+                final lastName = lastNameC.text.trim();
+                final schoolNo = schoolNoC.text.trim();
+
+                if (email.isEmpty || password.isEmpty || firstName.isEmpty || lastName.isEmpty || schoolNo.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Lütfen tüm alanları doldurun!'), backgroundColor: Colors.red),
+                  );
+                  return;
+                }
+
+                if (selectedRole == 'teacher' && !schoolNo.startsWith('t')) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Hoca okul numarası "t" ile başlamalıdır!'), backgroundColor: Colors.red),
+                  );
+                  return;
+                }
+
+                try {
+                  // 1. Auth hesabı oluştur
+                  final res = await _supabase.auth.signUp(email: email, password: password);
+                  final userId = res.user?.id;
+
+                  if (userId != null) {
+                    // 2. Users tablosuna ekle
+                    await _supabase.from('users').insert({
+                      'id': userId,
+                      'email': email,
+                      'first_name': firstName,
+                      'last_name': lastName,
+                      'school_no': schoolNo,
+                      'role': selectedRole,
+                      'title': selectedTitle,
+                    });
+
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Kullanıcı başarıyla oluşturuldu'), backgroundColor: AppColors.success),
+                      );
+                      Navigator.pop(context);
+                      _loadStats(); // Listeyi yenile
+                    }
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Hata: $e'), backgroundColor: Colors.red),
+                    );
+                  }
+                }
+              },
+              child: const Text('Oluştur'),
+            ),
+          ],
+        ),
       ),
     );
   }
