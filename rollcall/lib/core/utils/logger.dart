@@ -8,7 +8,7 @@ class AppLogger {
       lineLength: 80, // Çizgi uzunluğunu daraltır
       colors: true, // Renkli çıktı
       printEmojis: true, // Emoji desteği
-      printTime: false, // Zaman damgasını gizleyerek satırı sadeleştirir
+      dateTimeFormat: DateTimeFormat.none, // Zaman damgasını gizleyerek satırı sadeleştirir
     ),
   );
 

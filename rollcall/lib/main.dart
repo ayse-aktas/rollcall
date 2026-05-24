@@ -18,7 +18,6 @@ import 'view/login/support_form_page.dart';
 
 import 'core/utils/logger.dart';
 
-
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting('tr_TR', null);
@@ -40,7 +39,6 @@ void main() async {
 
   AppLogger.i('🚀 Uygulama başlatıldı: Supabase ve Firebase hazır.');
 
-
   runApp(const MyApp());
 }
 
@@ -55,11 +53,12 @@ Future<void> _setupNotifications() async {
     await messaging.subscribeToTopic("all");
 
     // 3. Android için ön plan bildirim önceliğini ayarla
-    await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
-      alert: true,
-      badge: true,
-      sound: true,
-    );
+    await FirebaseMessaging.instance
+        .setForegroundNotificationPresentationOptions(
+          alert: true,
+          badge: true,
+          sound: true,
+        );
   } catch (e) {
     AppLogger.e('Firebase Messaging Hatası: $e');
   }
@@ -82,13 +81,14 @@ class MyApp extends StatelessWidget {
         '/ogretmen-anasayfa': (context) => const TeacherHomePage(),
         '/ogretmen-ders-detay': (context) => const CourseStudentsPage(),
         '/ogretmen-analiz': (context) {
-          final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>;
+          final args =
+              ModalRoute.of(context)!.settings.arguments
+                  as Map<String, dynamic>;
           return TeacherAnalyticsPage(course: args);
         },
         '/admin-panel': (context) => const AdminPage(),
         '/support': (context) => const SupportFormPage(),
       },
-
     );
   }
 }

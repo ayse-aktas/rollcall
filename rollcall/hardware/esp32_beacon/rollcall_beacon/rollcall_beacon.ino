@@ -1,8 +1,3 @@
-/*
- * RollCall System - ESP32 Smart Attendance Controller
- * v2.1 - Hash-Based | Standard BLE | Supabase
- */
-
 #include <BLEDevice.h>
 #include <BLEUtils.h>
 #include <BLEScan.h>

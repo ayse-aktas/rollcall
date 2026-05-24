@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/utils/logger.dart';
 
@@ -54,6 +54,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
       // 3. Kod girme ekranına yönlendir
       if (mounted) {
         Future.delayed(const Duration(seconds: 2), () {
+          if (!mounted) return;
           Navigator.pushNamed(
             context,
             '/reset-password',

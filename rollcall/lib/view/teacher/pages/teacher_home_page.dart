@@ -111,7 +111,7 @@ class _TeacherHomePageState extends State<TeacherHomePage> with SingleTickerProv
                       },
                       onSignOut: () async {
                         await _supabase.auth.signOut();
-                        if (mounted) Navigator.pushReplacementNamed(context, '/login');
+                        if (context.mounted) Navigator.pushReplacementNamed(context, '/login');
                       }
                     ),
                   ),

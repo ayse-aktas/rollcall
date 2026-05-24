@@ -114,8 +114,7 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
   int _automationTimer = 0;
   Timer? _automationCountdownTimer;
   String _sortBy = 'Okul No';
-  int _selectedSlot = 1;
-  List<int> _plannedMinutes = [];
+  final int _selectedSlot = 1;
   Timer? _plannedAttendanceCheckTimer;
   bool _isIntervalMode = false;
   int _intervalMinutes = 30;
@@ -425,32 +424,6 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
 
   void _showPlannedAttendanceDialog() {
     if (_course == null) return;
-    
-    final String startTimeStr = _course!['course_time'] ?? '00:00:00';
-    final String endTimeStr = _course!['course_end_time'] ?? '00:00:00';
-    
-    final startParts = startTimeStr.split(':');
-    final endParts = endTimeStr.split(':');
-    
-    final int startH = int.parse(startParts[0]);
-    final int startM = int.parse(startParts[1]);
-    final int endH = int.parse(endParts[0]);
-    final int endM = int.parse(endParts[1]);
-    
-    final int startTotal = startH * 60 + startM;
-    int endTotal = endH * 60 + endM;
-    if (endTotal <= startTotal) {
-      endTotal = startTotal + 180; 
-    }
-    
-    int totalDurationMinutes = endTotal - startTotal;
-    
-    final now = DateTime.now();
-    final classStartTime = DateTime(now.year, now.month, now.day, startH, startM);
-    final elapsedMinutes = now.difference(classStartTime).inMinutes;
-    
-    int _customMinute = elapsedMinutes > 45 ? elapsedMinutes + 5 : 60;
-    if (_customMinute > totalDurationMinutes) _customMinute = totalDurationMinutes;
 
     showDialog(
       context: context,
@@ -1639,7 +1612,9 @@ class _QRDisplayDialogState extends State<_QRDisplayDialog> {
   Future<void> _getTeacherLocation() async {
     try {
       final position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
       );
       setState(() {
         _teacherLat = position.latitude;

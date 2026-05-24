@@ -594,9 +594,11 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
       await file.writeAsBytes(fileBytes);
       
       if (context.mounted) {
-        await Share.shareXFiles(
-          [XFile(file.path)],
-          subject: 'Yoklama Raporu',
+        await SharePlus.instance.share(
+          ShareParams(
+            files: [XFile(file.path)],
+            subject: 'Yoklama Raporu',
+          ),
         );
       }
     }

@@ -34,6 +34,8 @@ class _UserDetailPageState extends State<UserDetailPage> {
   
   late TextEditingController _emailC;
   late TextEditingController _schoolNoC;
+  late TextEditingController _firstNameC;
+  late TextEditingController _lastNameC;
 
   @override
   void initState() {
@@ -42,6 +44,8 @@ class _UserDetailPageState extends State<UserDetailPage> {
     _selectedRole = widget.user['role'] as String?;
     _emailC = TextEditingController(text: widget.user['email']);
     _schoolNoC = TextEditingController(text: widget.user['school_no']?.toString() ?? '');
+    _firstNameC = TextEditingController(text: widget.user['first_name']);
+    _lastNameC = TextEditingController(text: widget.user['last_name']);
     _loadData();
   }
 
@@ -101,7 +105,7 @@ class _UserDetailPageState extends State<UserDetailPage> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: Text('${widget.user['first_name']} ${widget.user['last_name']}'),
+        title: Text('${_firstNameC.text} ${_lastNameC.text}'),
         backgroundColor: Colors.white,
         foregroundColor: AppColors.textPrimary,
         elevation: 0,
@@ -170,6 +174,12 @@ class _UserDetailPageState extends State<UserDetailPage> {
       ),
       child: Column(
         children: [
+          _isEditing
+              ? _buildEditableRow(Icons.person_outline, 'Ad', _firstNameC)
+              : _buildInfoRow(Icons.person_outline, 'Ad', _firstNameC.text),
+          _isEditing
+              ? _buildEditableRow(Icons.person_outline, 'Soyad', _lastNameC)
+              : _buildInfoRow(Icons.person_outline, 'Soyad', _lastNameC.text),
           _isEditing
               ? _buildEditableRow(Icons.email_outlined, 'E-posta', _emailC)
               : _buildInfoRow(Icons.email_outlined, 'E-posta', _emailC.text),
@@ -299,7 +309,7 @@ class _UserDetailPageState extends State<UserDetailPage> {
           icon: const Icon(Icons.swap_horiz_rounded, size: 16),
           label: const Text('Ata'),
           style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.primary.withOpacity(0.1),
+            backgroundColor: AppColors.primary.withValues(alpha: 0.1),
             foregroundColor: AppColors.primary,
             elevation: 0,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -313,10 +323,12 @@ class _UserDetailPageState extends State<UserDetailPage> {
     // Validasyonlar
     final email = _emailC.text.trim();
     final schoolNo = _schoolNoC.text.trim();
+    final firstName = _firstNameC.text.trim();
+    final lastName = _lastNameC.text.trim();
 
-    if (email.isEmpty || schoolNo.isEmpty) {
+    if (email.isEmpty || schoolNo.isEmpty || firstName.isEmpty || lastName.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('E-posta ve Okul No boş bırakılamaz!'), backgroundColor: Colors.red),
+        const SnackBar(content: Text('Ad, Soyad, E-posta ve Okul No boş bırakılamaz!'), backgroundColor: Colors.red),
       );
       return;
     }
@@ -358,6 +370,8 @@ class _UserDetailPageState extends State<UserDetailPage> {
       }
 
       await _supabase.from('users').update({
+        'first_name': firstName,
+        'last_name': lastName,
         'email': email,
         'school_no': schoolNo,
         'role': _selectedRole,
@@ -399,8 +413,8 @@ class _UserDetailPageState extends State<UserDetailPage> {
     
     showDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDState) => AlertDialog(
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDState) => AlertDialog(
           title: const Text('Öğrenciye Ders Ekle'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
@@ -420,7 +434,7 @@ class _UserDetailPageState extends State<UserDetailPage> {
             ],
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('İptal')),
+            TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('İptal')),
             ElevatedButton(
               onPressed: () async {
                 if (selectedCourseId == null) {
@@ -444,12 +458,14 @@ class _UserDetailPageState extends State<UserDetailPage> {
                     'course_id': selectedCourseId,
                   });
                   
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Ders başarıyla eklendi'), backgroundColor: AppColors.success),
-                    );
-                    Navigator.pop(context);
-                    _loadData();
+                  if (dialogContext.mounted) {
+                    Navigator.pop(dialogContext);
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Ders başarıyla eklendi'), backgroundColor: AppColors.success),
+                      );
+                      _loadData();
+                    }
                   }
                 } catch (e) {
                   if (mounted) {
@@ -472,8 +488,8 @@ class _UserDetailPageState extends State<UserDetailPage> {
     
     showDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDState) => AlertDialog(
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDState) => AlertDialog(
           title: const Text('Dersi Başkasına Ata'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
@@ -493,7 +509,7 @@ class _UserDetailPageState extends State<UserDetailPage> {
             ],
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('İptal')),
+            TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('İptal')),
             ElevatedButton(
               onPressed: () async {
                 if (selectedTeacherId == null) {
@@ -538,14 +554,15 @@ class _UserDetailPageState extends State<UserDetailPage> {
                   }
                   
                   if (hasOverlap) {
+                    if (!mounted) return;
                     final bool? proceed = await showDialog<bool>(
                       context: context,
-                      builder: (context) => AlertDialog(
+                      builder: (overlapDialogContext) => AlertDialog(
                         title: const Text('⚠️ Çakışma Uyarısı'),
                         content: Text('Bu hocanın o gün ve saatte "$conflictCourseName" dersi bulunmaktadır. Yine de devam etmek istiyor musunuz?'),
                         actions: [
-                          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Hayır, İptal')),
-                          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Evet, Devam Et')),
+                          TextButton(onPressed: () => Navigator.pop(overlapDialogContext, false), child: const Text('Hayır, İptal')),
+                          ElevatedButton(onPressed: () => Navigator.pop(overlapDialogContext, true), child: const Text('Evet, Devam Et')),
                         ],
                       ),
                     );
@@ -560,12 +577,14 @@ class _UserDetailPageState extends State<UserDetailPage> {
                       .update({'teacher_id': targetTeacherId})
                       .eq('id', course['id']);
                       
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Ders başarıyla devredildi'), backgroundColor: AppColors.success),
-                    );
-                    Navigator.pop(context);
-                    _loadData();
+                  if (dialogContext.mounted) {
+                    Navigator.pop(dialogContext);
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Ders başarıyla devredildi'), backgroundColor: AppColors.success),
+                      );
+                      _loadData();
+                    }
                   }
                 } catch (e) {
                   if (mounted) {
@@ -645,7 +664,7 @@ class _AttendanceListState extends State<_AttendanceList> {
     return Column(
       children: _records.map((r) {
         final slot = r['slot'] as int? ?? 1;
-        final slotLabel = slot > 1 ? ' · ${slot}. Ders' : '';
+        final slotLabel = slot > 1 ? ' · $slot. Ders' : '';
         return ListTile(
           title: Text('${r['date'] ?? '-'}$slotLabel'),
           subtitle: Text(r['is_present'] == true ? 'Geldi' : 'Gelmedi'),
@@ -665,8 +684,8 @@ class _AttendanceListState extends State<_AttendanceList> {
 
     showDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDState) => AlertDialog(
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDState) => AlertDialog(
           title: const Text('Yoklama Güncelle'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
@@ -699,7 +718,7 @@ class _AttendanceListState extends State<_AttendanceList> {
             ],
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('İptal')),
+            TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('İptal')),
             ElevatedButton(
               onPressed: () async {
                 if (commentC.text.isEmpty) {
@@ -707,25 +726,28 @@ class _AttendanceListState extends State<_AttendanceList> {
                       const SnackBar(content: Text('Lütfen açıklama yazın!')));
                   return;
                 }
+                if (!mounted) return;
                 final confirm = await showDialog<bool>(
                   context: context,
-                  builder: (context) => AlertDialog(
+                  builder: (confirmDialogContext) => AlertDialog(
                     title: const Text('Onay Gerekiyor'),
                     content: const Text(
                         'Bu yoklama değişikliğini kaydetmek istediğinize emin misiniz?'),
                     actions: [
                       TextButton(
-                          onPressed: () => Navigator.pop(context, false),
+                          onPressed: () => Navigator.pop(confirmDialogContext, false),
                           child: const Text('Hayır')),
                       TextButton(
-                          onPressed: () => Navigator.pop(context, true),
+                          onPressed: () => Navigator.pop(confirmDialogContext, true),
                           child: const Text('Evet, Kaydet')),
                     ],
                   ),
                 );
                 if (confirm == true) {
                   await _performUpdate(record, newIsPresent, commentC.text, docC.text);
-                  if (mounted) Navigator.pop(context);
+                  if (dialogContext.mounted) {
+                    Navigator.pop(dialogContext);
+                  }
                 }
               },
               child: const Text('Güncelle ve Kaydet'),

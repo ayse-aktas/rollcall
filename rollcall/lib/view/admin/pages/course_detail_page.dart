@@ -18,7 +18,7 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
   final _supabase = Supabase.instance.client;
   late TextEditingController _nameC;
   late TextEditingController _codeC;
-  late TextEditingController _sectionC;
+  String? _selectedSection;
   late TextEditingController _startTimeC;
   late TextEditingController _endTimeC;
   String? _selectedTeacherId;
@@ -31,7 +31,7 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
   List<Map<String, dynamic>> _sessions = [];
   List<Map<String, dynamic>> _otherCoursesInClassroom = [];
   List<Map<String, dynamic>> _students = [];
-  Set<String> _selectedSessions = {};
+  final Set<String> _selectedSessions = {};
   int _totalLecturesHeld = 0;
   int _currentPage = 0;
   final int _rowsPerPage = 5;
@@ -43,7 +43,32 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
     super.initState();
     _nameC = TextEditingController(text: widget.course['course_name']);
     _codeC = TextEditingController(text: widget.course['course_code']);
-    _sectionC = TextEditingController(text: widget.course['section'] ?? '');
+    
+    // Normalize existing single-letter sections (e.g., 'A' -> 'A Grubu')
+    final rawSection = widget.course['section'] as String?;
+    if (rawSection != null) {
+      final s = rawSection.trim().toUpperCase();
+      if (s == 'A' || s == 'A GRUBU') {
+        _selectedSection = 'A Grubu';
+      } else if (s == 'B' || s == 'B GRUBU') {
+        _selectedSection = 'B Grubu';
+      } else if (s == 'C' || s == 'C GRUBU') {
+        _selectedSection = 'C Grubu';
+      } else if (s == 'D' || s == 'D GRUBU') {
+        _selectedSection = 'D Grubu';
+      } else if (s == 'E' || s == 'E GRUBU') {
+        _selectedSection = 'E Grubu';
+      } else if (s == 'F' || s == 'F GRUBU') {
+        _selectedSection = 'F Grubu';
+      } else if (s == 'G' || s == 'G GRUBU') {
+        _selectedSection = 'G Grubu';
+      } else {
+        _selectedSection = null;
+      }
+    } else {
+      _selectedSection = null;
+    }
+
     _startTimeC = TextEditingController(text: widget.course['course_time'] ?? '09:00');
     _endTimeC = TextEditingController(text: widget.course['course_end_time'] ?? '11:00');
     _selectedTeacherId = widget.course['teacher_id']?.toString();
@@ -86,7 +111,7 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
       sessionList.sort((a, b) => b['dateTime'].compareTo(a['dateTime']));
       setState(() => _sessions = sessionList);
     } catch (e) {
-      print('Oturum yükleme hatası: $e');
+      debugPrint('Oturum yükleme hatası: $e');
     }
   }
 
@@ -134,7 +159,7 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
       });
       _sortStudents(); // Apply default sorting
     } catch (e) {
-      print('Öğrenci yükleme hatası: $e');
+      debugPrint('Öğrenci yükleme hatası: $e');
     }
   }
 
@@ -179,7 +204,7 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
           .order('name');
       setState(() => _classrooms = List<Map<String, dynamic>>.from(res));
     } catch (e) {
-      print('Sınıf yükleme hatası: $e');
+      debugPrint('Sınıf yükleme hatası: $e');
     }
   }
 
@@ -195,7 +220,7 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
           
       setState(() => _otherCoursesInClassroom = List<Map<String, dynamic>>.from(res));
     } catch (e) {
-      print('Diğer dersleri yükleme hatası: $e');
+      debugPrint('Diğer dersleri yükleme hatası: $e');
     }
   }
 
@@ -225,6 +250,21 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
         if (time != null) {
           setState(() {
             controller.text = '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+            
+            // İnteraktif düzeltme: Başlangıç saati >= Bitiş saati olamaz
+            final startMin = _timeToMinutes(_startTimeC.text);
+            final endMin = _timeToMinutes(_endTimeC.text);
+            if (startMin >= endMin) {
+              if (controller == _startTimeC) {
+                // Başlangıç saati değiştiyse, bitişi 2 saat sonrasına ayarla
+                final newEndHour = (time.hour + 2) % 24;
+                _endTimeC.text = '${newEndHour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+              } else {
+                // Bitiş saati değiştiyse, başlangıcı 2 saat öncesine ayarla
+                final newStartHour = (time.hour - 2 + 24) % 24;
+                _startTimeC.text = '${newStartHour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+              }
+            }
           });
         }
       },
@@ -243,6 +283,22 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
   }
 
   Future<void> _saveChanges() async {
+    if (_nameC.text.trim().isEmpty || _selectedTeacherId == null || _selectedSection == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Lütfen Ders Adı, Öğretmen ve Şube / Grup alanlarını doldurun!'), backgroundColor: Colors.red),
+      );
+      return;
+    }
+
+    final startMin = _timeToMinutes(_startTimeC.text);
+    final endMin = _timeToMinutes(_endTimeC.text);
+    if (startMin >= endMin) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('⚠️ Başlangıç saati bitiş saatinden önce olmalıdır!'), backgroundColor: Colors.red),
+      );
+      return;
+    }
+
     setState(() => _isSaving = true);
     try {
       // 1. Değişiklik Onayı
@@ -295,6 +351,7 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
       }
 
       if (hasOverlap) {
+        if (!mounted) return;
         final bool? proceed = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
@@ -317,7 +374,7 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
         'course_name': _nameC.text,
         'course_code': _codeC.text,
         'classroom_id': _selectedClassroomId,
-        'section': _sectionC.text.trim().isEmpty ? null : _sectionC.text.trim(),
+        'section': _selectedSection,
         'teacher_id': _selectedTeacherId,
         'assigned_teacher_id': _selectedAssignedTeacherId,
         'course_day': _selectedDay,
@@ -342,7 +399,7 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
   Widget build(BuildContext context) {
     final bool hasChanges = _nameC.text != widget.course['course_name'] ||
         _codeC.text != widget.course['course_code'] ||
-        _sectionC.text != (widget.course['section'] ?? '') ||
+        _selectedSection != widget.course['section'] ||
         _startTimeC.text != (widget.course['course_time'] ?? '') ||
         _endTimeC.text != (widget.course['course_end_time'] ?? '') ||
         _selectedTeacherId != widget.course['teacher_id']?.toString() ||
@@ -379,7 +436,7 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
             Padding(
               padding: const EdgeInsets.only(bottom: 16),
               child: DropdownButtonFormField<String>(
-                value: _selectedClassroomId,
+                initialValue: _selectedClassroomId,
                 decoration: InputDecoration(
                   labelText: 'Sınıf / Lab',
                   prefixIcon: const Icon(Icons.meeting_room_outlined, size: 20),
@@ -411,7 +468,29 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
             ),
             const SizedBox(height: 16),
 
-            _buildTextField(_sectionC, 'Şube (A, B, C ... boş bırakılabilir)', Icons.group_work_outlined),
+            DropdownButtonFormField<String>(
+              initialValue: ['A Grubu', 'B Grubu', 'C Grubu', 'D Grubu', 'E Grubu', 'F Grubu', 'G Grubu'].contains(_selectedSection)
+                  ? _selectedSection
+                  : null,
+              isExpanded: true,
+              decoration: InputDecoration(
+                labelText: 'Şube / Grup Seçin *',
+                prefixIcon: const Icon(Icons.group_work_outlined, size: 20),
+                filled: true,
+                fillColor: Colors.white,
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+              ),
+              items: ['A Grubu', 'B Grubu', 'C Grubu', 'D Grubu', 'E Grubu', 'F Grubu', 'G Grubu'].map((g) => DropdownMenuItem<String>(
+                value: g,
+                child: Text(g),
+              )).toList(),
+              onChanged: (v) {
+                setState(() {
+                  _selectedSection = v;
+                });
+              },
+            ),
             const SizedBox(height: 16),
             _buildSectionHeader('Ana Öğretmen'),
             const SizedBox(height: 8),
@@ -516,7 +595,7 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
                                 right: -50, // Bir sonraki dairenin merkezine kadar uzat
                                 child: Container(
                                   height: 2,
-                                  color: AppColors.primary.withOpacity(0.5),
+                                  color: AppColors.primary.withValues(alpha: 0.5),
                                 ),
                               ),
                             Column(
@@ -697,7 +776,7 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
     final hasValue = items.any((item) => item.value == value);
 
     return DropdownButtonFormField<String>(
-      value: hasValue ? value : null,
+      initialValue: hasValue ? value : null,
       decoration: InputDecoration(
         labelText: label,
         filled: true,
@@ -717,7 +796,7 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
       'Thursday': 'Perşembe', 'Friday': 'Cuma', 'Saturday': 'Cumartesi', 'Sunday': 'Pazar'
     };
     return DropdownButtonFormField<String>(
-      value: _selectedDay,
+      initialValue: _selectedDay,
       decoration: InputDecoration(
         labelText: 'Ders Günü',
         filled: true,
@@ -830,7 +909,9 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
       await Printing.sharePdf(bytes: bytes, filename: 'yoklama_raporu_${widget.course['course_code']}.pdf');
 
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Rapor oluşturulurken hata: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Rapor oluşturulurken hata: $e')));
+      }
     } finally {
       setState(() => _isSaving = false);
     }

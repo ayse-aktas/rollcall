@@ -3,8 +3,6 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:convert';
 import 'dart:async';
-import 'package:flutter_beacon/flutter_beacon.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:geolocator/geolocator.dart';
 import '../../../core/utils/theme/colors/app_colors.dart';
 import '../../../core/utils/security_utils.dart';
@@ -20,56 +18,9 @@ class _QRScannerPageState extends State<QRScannerPage> {
   final MobileScannerController controller = MobileScannerController();
   bool _isProcessing = false;
 
-  // Beacon variables
-  StreamSubscription<RangingResult>? _beaconSubscription;
-  bool _proximityVerified = false;
-  String? _detectedBeaconToken;
-
   @override
   void initState() {
     super.initState();
-    _initBeaconScanning();
-  }
-
-  Future<void> _initBeaconScanning() async {
-    final status = await [
-      Permission.location,
-      Permission.bluetoothScan,
-      Permission.bluetoothConnect,
-    ].request();
-
-    if (status.values.every((s) => s.isGranted)) {
-      try {
-        await flutterBeacon.initializeScanning;
-
-        // Match the UUID used in Teacher app
-        final regions = <Region>[
-          Region(
-            identifier: 'RollCallBeacon',
-            proximityUUID: 'E2C56DB5-DFFB-48D2-B060-D0F5A71096E0',
-          ),
-        ];
-
-        _beaconSubscription = flutterBeacon.ranging(regions).listen((result) {
-          if (result.beacons.isNotEmpty) {
-            // Sort by signal strength (RSSI)
-            final closest = result.beacons.reduce(
-              (a, b) => a.rssi > b.rssi ? a : b,
-            );
-
-            // Proximity check (approximately < 5-10 meters if RSSI > -85)
-            if (closest.rssi > -85) {
-              setState(() {
-                _proximityVerified = true;
-                _detectedBeaconToken = closest.minor.toString();
-              });
-            }
-          }
-        });
-      } catch (e) {
-        debugPrint('Beacon Scan Error: $e');
-      }
-    }
   }
 
   Future<void> _processQR(String code) async {
@@ -77,6 +28,12 @@ class _QRScannerPageState extends State<QRScannerPage> {
     setState(() => _isProcessing = true);
 
     try {
+      try {
+        await controller.stop();
+      } catch (e) {
+        debugPrint('Error stopping mobile scanner: $e');
+      }
+
       final data = jsonDecode(code);
       if (data['type'] != 'attendance_qr') {
         throw 'Geçersiz QR kodu';
@@ -85,8 +42,6 @@ class _QRScannerPageState extends State<QRScannerPage> {
       final String courseId = data['course_id'];
       final String date = data['date'];
       final int slot = data['slot'] ?? 1;
-      final bool isSecure = data['secure'] ?? false;
-      final String? expectedBeaconToken = data['beacon_token'];
       final double? teacherLat = data['lat'];
       final double? teacherLng = data['lng'];
 
@@ -101,7 +56,7 @@ class _QRScannerPageState extends State<QRScannerPage> {
         }
         
         final studentPosition = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high,
+          locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
         );
         
         final distance = Geolocator.distanceBetween(
@@ -116,62 +71,7 @@ class _QRScannerPageState extends State<QRScannerPage> {
         }
       }
 
-      // SECURE MODE VALIDATION
-      if (isSecure && expectedBeaconToken != null) {
-        if (!_proximityVerified) {
-          // USER FALLBACK: QR only session (as per user request)
-          debugPrint(
-            'SECURITY WARNING: Proximity NOT verified. Proceeding with QR-only fallback.',
-          );
-        } else if (_detectedBeaconToken != expectedBeaconToken) {
-          // Token mismatch (could be old beacon scan or buddy reporting attempt)
-          // But since tokens rotate every 30s, we allow a small window.
-          final bool isValidToken = SecurityUtils.verifyTimeToken(
-            courseId,
-            _detectedBeaconToken!,
-          );
-          if (!isValidToken) {
-            debugPrint('SECURITY WARNING: Beacon token mismatch.');
-          }
-        }
-      }
-
       final supabase = Supabase.instance.client;
-
-      // NEW: GPS & Beacon Secret Verification (Geofencing)
-      final courseData = await supabase
-          .from('courses')
-          .select('*, classrooms(*, faculties(*))')
-          .eq('id', courseId)
-          .single();
-
-      String? classroomSecret;
-
-      if (courseData['classrooms'] != null &&
-          courseData['classrooms']['faculties'] != null) {
-        LocationPermission permission = await Geolocator.checkPermission();
-        if (permission == LocationPermission.denied) {
-          permission = await Geolocator.requestPermission();
-          if (permission == LocationPermission.denied) {
-            throw 'Konum izni reddedildi.';
-          }
-        }
-        classroomSecret = courseData['classrooms']['beacon_secret'];
-      }
-
-      if (isSecure && classroomSecret != null) {
-        if (!_proximityVerified || _detectedBeaconToken == null) {
-          throw 'Sınıfta olduğunuz beacon cihazı tarafından doğrulanmadı.';
-        }
-
-        final bool isValidToken = SecurityUtils.verifyTimeToken(
-          classroomSecret,
-          _detectedBeaconToken!,
-        );
-        if (!isValidToken) {
-          throw 'Güvenlik kodu uyuşmuyor. Lütfen beacon cihazına yakınlaşın.';
-        }
-      }
       final studentId = supabase.auth.currentUser?.id;
 
       if (studentId == null) throw 'Oturum açılmamış';
@@ -222,9 +122,7 @@ class _QRScannerPageState extends State<QRScannerPage> {
 
       _showResultDialog(
         success: true,
-        message: _proximityVerified
-            ? 'Yoklamanız güvenli bir şekilde alındı.'
-            : 'Yoklamanız alındı (Yakınlık doğrulaması başarısız).',
+        message: 'Yoklamanız güvenli bir şekilde alındı.',
       );
     } catch (e) {
       if (!mounted) return;
@@ -317,10 +215,16 @@ class _QRScannerPageState extends State<QRScannerPage> {
         ),
         actions: [
           TextButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(context); // Close dialog
               if (success) {
                 Navigator.pop(context); // Close scanner page
+              } else {
+                try {
+                  await controller.start();
+                } catch (e) {
+                  debugPrint('Error starting mobile scanner: $e');
+                }
               }
             },
             child: const Text('Tamam'),
@@ -368,26 +272,11 @@ class _QRScannerPageState extends State<QRScannerPage> {
               height: 250,
               decoration: BoxDecoration(
                 border: Border.all(
-                  color: _proximityVerified
-                      ? AppColors.success
-                      : Colors.white.withValues(alpha: 0.5),
+                  color: Colors.white.withValues(alpha: 0.5),
                   width: 3,
                 ),
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: _proximityVerified
-                  ? const Align(
-                      alignment: Alignment.topRight,
-                      child: Padding(
-                        padding: EdgeInsets.all(8.0),
-                        child: Icon(
-                          Icons.bluetooth_connected_rounded,
-                          color: AppColors.success,
-                          size: 28,
-                        ),
-                      ),
-                    )
-                  : null,
             ),
           ),
           if (_isProcessing)
@@ -404,7 +293,6 @@ class _QRScannerPageState extends State<QRScannerPage> {
 
   @override
   void dispose() {
-    _beaconSubscription?.cancel();
     controller.dispose();
     super.dispose();
   }

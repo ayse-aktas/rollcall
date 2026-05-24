@@ -108,7 +108,7 @@ class _TeacherNotificationsSheetState extends State<TeacherNotificationsSheet> {
                           controller: controller,
                           padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
                           itemCount: _notifications.length,
-                          separatorBuilder: (_, __) => const SizedBox(height: 12),
+                          separatorBuilder: (_, _) => const SizedBox(height: 12),
                           itemBuilder: (context, index) => _NotificationCard(notification: _notifications[index]),
                         ),
             ),
