@@ -196,7 +196,7 @@ class _LoginPageState extends State<LoginPage>
           const Text(
             'RollCall',
             style: TextStyle(
-              fontSize: 24,
+              fontSize: 22,
               fontWeight: FontWeight.w900,
               color: Color(0xFF003CBF),
               letterSpacing: -0.5,
@@ -230,7 +230,7 @@ class _LoginPageState extends State<LoginPage>
             const Text(
               'RollCall\'a Hoş Geldiniz',
               style: TextStyle(
-                fontSize: 28,
+                  fontSize: 24,
                 fontWeight: FontWeight.w800,
                 color: Color(0xFF1A1D1F),
               ),
@@ -239,7 +239,7 @@ class _LoginPageState extends State<LoginPage>
             const Text(
               'Sisteme erişmek ve yoklama işlemlerine katılmak için lütfen bilgilerinizi doğrulayın.',
               style: TextStyle(
-                fontSize: 14,
+                fontSize: 13,
                 color: Color(0xFF6F767E),
                 height: 1.5,
               ),
@@ -250,7 +250,7 @@ class _LoginPageState extends State<LoginPage>
             const Text(
               'OKUL NUMARASI',
               style: TextStyle(
-                fontSize: 12,
+                fontSize: 11,
                 fontWeight: FontWeight.w700,
                 color: Color(0xFF1A1D1F),
                 letterSpacing: 0.5,
@@ -261,8 +261,8 @@ class _LoginPageState extends State<LoginPage>
             _buildTextField(
               controller: _emailController,
               hint: _loginType == LoginType.student
-                  ? 'G221210036'
-                  : 'S123456789',
+                  ? 'B123456789'
+                  : 't123456789',
               prefixIcon: Icons.person_outline_rounded,
             ),
 
@@ -273,7 +273,7 @@ class _LoginPageState extends State<LoginPage>
                 const Text(
                   'ŞİFRE',
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: 11,
                     fontWeight: FontWeight.w700,
                     color: Color(0xFF1A1D1F),
                     letterSpacing: 0.5,
@@ -284,7 +284,7 @@ class _LoginPageState extends State<LoginPage>
                   child: const Text(
                     'Şifremi Unuttum?',
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: 11,
                       fontWeight: FontWeight.w700,
                       color: Color(0xFF1E60D2),
                     ),
@@ -308,7 +308,7 @@ class _LoginPageState extends State<LoginPage>
                   children: [
                     Text(
                       _errorMessage!,
-                      style: const TextStyle(color: Colors.red, fontSize: 13, height: 1.4),
+                      style: const TextStyle(color: Colors.red, fontSize: 12, height: 1.4),
                     ),
                     if (_errorMessage!.contains('Şifre hatalı'))
                       TextButton(
@@ -323,7 +323,7 @@ class _LoginPageState extends State<LoginPage>
                           style: TextStyle(
                             color: Color(0xFF1E60D2),
                             fontWeight: FontWeight.w700,
-                            fontSize: 13,
+                            fontSize: 12,
                           ),
                         ),
                       ),
@@ -341,7 +341,7 @@ class _LoginPageState extends State<LoginPage>
                     text: "Bir sorun mu var? ",
                     style: const TextStyle(
                       color: Color(0xFF6F767E),
-                      fontSize: 13,
+                      fontSize: 12,
                     ),
                     children: [
                       TextSpan(
@@ -401,14 +401,19 @@ class _LoginPageState extends State<LoginPage>
               : null,
         ),
 
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w700,
-            color: isSelected
-                ? const Color(0xFF1E60D2)
-                : const Color(0xFF6F767E),
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            label,
+            maxLines: 1,
+            softWrap: false,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: isSelected
+                  ? const Color(0xFF1E60D2)
+                  : const Color(0xFF6F767E),
+            ),
           ),
         ),
       ),
@@ -425,13 +430,13 @@ class _LoginPageState extends State<LoginPage>
       controller: controller,
       obscureText: isPassword && _isPasswordHidden,
       style: const TextStyle(
-        fontSize: 15,
+        fontSize: 14,
         fontWeight: FontWeight.w500,
         color: Color(0xFF1A1D1F),
       ),
       decoration: InputDecoration(
         hintText: hint,
-        hintStyle: const TextStyle(color: Color(0xFFA6ADBB), fontSize: 15),
+        hintStyle: const TextStyle(color: Color(0xFFA6ADBB), fontSize: 14),
         filled: true,
         fillColor: const Color(0xFFE8F0FE),
         border: OutlineInputBorder(
@@ -490,7 +495,7 @@ class _LoginPageState extends State<LoginPage>
                     'GİRİŞ YAP',
                     style: TextStyle(
                       color: Colors.white,
-                      fontSize: 15,
+                      fontSize: 14,
                       fontWeight: FontWeight.w800,
                       letterSpacing: 1,
                     ),
