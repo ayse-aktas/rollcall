@@ -10,6 +10,7 @@ import 'package:beacon_broadcast/beacon_broadcast.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:geolocator/geolocator.dart';
 import '../../../core/utils/security_utils.dart';
+import '../../../core/utils/logger.dart';
 import '../../../core/services/person_detector_service.dart';
 import 'verification_camera_page.dart';
 
@@ -144,6 +145,10 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
         .from('student_courses')
         .select('student_id, users(id, first_name, last_name, school_no)')
         .eq('course_id', courseId);
+    final enrolledStudentIds = studentCourses
+        .map<String>((row) => (row['student_id'] ?? '').toString())
+        .where((id) => id.isNotEmpty)
+        .toSet();
 
     final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
 
@@ -157,16 +162,29 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
 
     final attendanceRecords = await _supabase
         .from('attendance')
-        .select('student_id, is_present')
+        .select('student_id, is_present, verify_method, created_at, slot')
         .eq('course_id', courseId)
         .eq('date', dateStr)
-        .eq('slot', _selectedSlot);
+        .or('slot.eq.$_selectedSlot,slot.is.null')
+        .order('created_at', ascending: false);
+
+    final Map<String, Map<String, dynamic>> bestAttendanceRow = {};
+
+    for (var record in attendanceRecords) {
+      final sid = (record['student_id'] ?? '').toString();
+      if (sid.isEmpty) continue;
+      if (!enrolledStudentIds.contains(sid)) continue;
+
+      if (!bestAttendanceRow.containsKey(sid)) {
+        bestAttendanceRow[sid] = record;
+      }
+    }
 
     final Map<String, bool> attendanceMap = {};
-    for (var record in attendanceRecords) {
-      attendanceMap[record['student_id']] = record['is_present'] ?? false;
+    for (final entry in bestAttendanceRow.entries) {
+      attendanceMap[entry.key] = entry.value['is_present'] ?? false;
     }
-    
+
     final myId = _supabase.auth.currentUser?.id;
     final assignedTeacherId = courseDetails['assigned_teacher_id'];
     final isDelegated = assignedTeacherId != null && assignedTeacherId != myId;
@@ -198,8 +216,6 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
     );
     _realtimeChannel!.subscribe();
   }
-
-
 
   void _startAutomaticAttendance() async {
     if (_isAutomationRunning) return;
@@ -310,13 +326,15 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
     await _loadData();
   }
 
-  Future<void> _toggleAttendance(String studentId, bool? currentVal) async {
+  Future<void> _setManualAttendance(String studentId, bool isPresent) async {
     final isToday = DateUtils.isSameDay(_selectedDate, DateTime.now());
     if (!isToday) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Geçmiş veya gelecek tarihli yoklamalar değiştirilemez.'),
+            content: Text(
+              'Geçmiş veya gelecek tarihli yoklamalar değiştirilemez.',
+            ),
             backgroundColor: Colors.orange,
           ),
         );
@@ -324,54 +342,103 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
       return;
     }
 
-    final newVal = !(currentVal ?? false);
     final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
     final courseId = _course!['id'];
+    final previousVal = _attendanceMap[studentId] ?? false;
 
     setState(() {
-      _attendanceMap[studentId] = newVal;
+      _attendanceMap[studentId] = isPresent;
     });
 
     try {
-      final existing = await _supabase
-          .from('attendance')
-          .select('id')
-          .eq('student_id', studentId)
-          .eq('course_id', courseId)
-          .eq('date', dateStr)
-          .eq('slot', _selectedSlot)
-          .maybeSingle();
-
-      if (existing != null) {
-        await _supabase
-            .from('attendance')
-            .update({
-              'is_present': newVal,
-            })
-            .eq('id', existing['id']);
-      } else {
-        await _supabase
-            .from('attendance')
-            .insert({
-              'student_id': studentId,
-              'course_id': courseId,
-              'date': dateStr,
-              'slot': _selectedSlot,
-              'is_present': newVal,
-            });
+      final savedRow = await _upsertManualAttendance(
+        studentId: studentId,
+        courseId: courseId,
+        dateStr: dateStr,
+        isPresent: isPresent,
+      );
+      final savedPresent = savedRow['is_present'] == true;
+      if (savedPresent != isPresent) {
+        throw Exception(
+          'DB beklenen değeri kaydetmedi. Beklenen: $isPresent, DB: ${savedRow['is_present']}, satır: ${savedRow['id']}',
+        );
       }
-      if (_sortBy == 'Durum') _sortStudents();
-    } catch (e) {
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Hata oluştu: $e'),
+          content: Text(
+            'Manuel yoklama kaydedildi: ${isPresent ? 'Var' : 'Yok'}',
+          ),
+          backgroundColor: AppColors.success,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      if (_sortBy == 'Durum') _sortStudents();
+    } catch (e) {
+      AppLogger.e(
+        'Manual attendance failed student=$studentId course=$courseId date=$dateStr target=$isPresent',
+        e,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Manuel yoklama kaydedilemedi: $e'),
           backgroundColor: AppColors.error,
+          duration: const Duration(seconds: 6),
         ),
       );
       setState(() {
-        _attendanceMap[studentId] = currentVal ?? false;
+        _attendanceMap[studentId] = previousVal;
       });
+    }
+  }
+
+  Future<Map<String, dynamic>> _upsertManualAttendance({
+    required String studentId,
+    required String courseId,
+    required String dateStr,
+    required bool isPresent,
+  }) async {
+    AppLogger.i(
+      'Manual attendance RPC request student=$studentId course=$courseId date=$dateStr slot=$_selectedSlot target=$isPresent',
+    );
+
+    try {
+      final saved = await _supabase.rpc(
+        'mark_manual_attendance',
+        params: {
+          'p_student_id': studentId,
+          'p_course_id': courseId,
+          'p_date': dateStr,
+          'p_slot': _selectedSlot,
+          'p_is_present': isPresent,
+        },
+      );
+      final row = Map<String, dynamic>.from(saved as Map);
+      AppLogger.i('Manual attendance RPC saved row=$row');
+      return row;
+    } on PostgrestException catch (e) {
+      if (e.code == 'PGRST202' ||
+          e.message.contains('mark_manual_attendance')) {
+        throw Exception(
+          'Supabase RPC bulunamadı. backend/database/migrations/007_fix_manual_attendance_rpc_schema.sql dosyasını SQL Editor’da çalıştırın.',
+        );
+      }
+      if (e.code == '42703' && e.message.contains('attendance_method')) {
+        throw Exception(
+          'Supabase’de eski manuel yoklama fonksiyonu var. backend/database/migrations/007_fix_manual_attendance_rpc_schema.sql dosyasını SQL Editor’da çalıştırın.',
+        );
+      }
+      if (e.code == '42501') {
+        throw Exception(
+          'Bu ders için manuel yoklama yetkiniz yok. Dersi veren veya devredilen öğretmen olmalısınız.',
+        );
+      }
+      if (e.code == '23514') {
+        throw Exception('Öğrenci bu derse kayıtlı değil.');
+      }
+      rethrow;
     }
   }
 
@@ -431,18 +498,32 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              title: const Text('Planlı Yoklama Ayarla', style: TextStyle(fontWeight: FontWeight.bold)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              title: const Text(
+                'Planlı Yoklama Ayarla',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
               content: SizedBox(
                 width: double.maxFinite,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Her kaç dakikada bir yoklama alınsın?', style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+                    const Text(
+                      'Her kaç dakikada bir yoklama alınsın?',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
                     const SizedBox(height: 16),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 4,
+                      ),
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(color: Colors.grey.shade300),
@@ -469,7 +550,10 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                     const SizedBox(height: 8),
                     const Text(
                       'En fazla sıklık olarak 30 dk seçilebilir.',
-                      style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppColors.textSecondary,
+                      ),
                     ),
                   ],
                 ),
@@ -477,7 +561,10 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(context),
-                  child: const Text('Kapat', style: TextStyle(color: AppColors.textSecondary)),
+                  child: const Text(
+                    'Kapat',
+                    style: TextStyle(color: AppColors.textSecondary),
+                  ),
                 ),
                 ElevatedButton(
                   onPressed: () {
@@ -487,41 +574,52 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                     _startPlannedAttendanceMonitoring();
                     Navigator.pop(context);
                   },
-                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                  ),
                   child: const Text('Kaydet'),
                 ),
               ],
             );
-          }
+          },
         );
       },
     );
-
-
   }
 
   void _startPlannedAttendanceMonitoring() {
     _plannedAttendanceCheckTimer?.cancel();
     if (!_isIntervalMode) return;
 
-    _plannedAttendanceCheckTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+    _plannedAttendanceCheckTimer = Timer.periodic(const Duration(seconds: 1), (
+      timer,
+    ) {
       if (_course == null) return;
-      
+
       final String startTimeStr = _course!['course_time'] ?? '00:00:00';
       final startParts = startTimeStr.split(':');
       final int startH = int.parse(startParts[0]);
       final int startM = int.parse(startParts[1]);
 
       final now = DateTime.now();
-      final classStartTime = DateTime(now.year, now.month, now.day, startH, startM);
-      
+      final classStartTime = DateTime(
+        now.year,
+        now.month,
+        now.day,
+        startH,
+        startM,
+      );
+
       final elapsedMinutes = now.difference(classStartTime).inMinutes;
 
       // Calculate countdown to next interval
-      final nextAttendanceMinute = ((elapsedMinutes ~/ _intervalMinutes) + 1) * _intervalMinutes;
-      final nextAttendanceTime = classStartTime.add(Duration(minutes: nextAttendanceMinute));
+      final nextAttendanceMinute =
+          ((elapsedMinutes ~/ _intervalMinutes) + 1) * _intervalMinutes;
+      final nextAttendanceTime = classStartTime.add(
+        Duration(minutes: nextAttendanceMinute),
+      );
       final remaining = nextAttendanceTime.difference(now);
-      
+
       if (remaining.isNegative) {
         _countdownText = '00:00:00';
       } else {
@@ -530,7 +628,7 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
         final seconds = (remaining.inSeconds % 60).toString().padLeft(2, '0');
         _countdownText = '$hours:$minutes:$seconds';
       }
-      
+
       setState(() {}); // Update UI for countdown
 
       if (elapsedMinutes > 0 && elapsedMinutes != _lastTriggeredMinute) {
@@ -662,7 +760,10 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
             child: Column(
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 12,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(16),
@@ -685,9 +786,7 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                                 ),
                                 const SizedBox(height: 1),
                                 Text(
-                                  _translateCourseName(
-                                    _course?['course_name'],
-                                  ),
+                                  _translateCourseName(_course?['course_name']),
                                   style: const TextStyle(
                                     fontSize: 16,
                                     fontWeight: FontWeight.bold,
@@ -761,14 +860,22 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                           children: [
                             Expanded(
                               child: InkWell(
-                                onTap: _isDelegated ? null : _showPlannedAttendanceDialog,
+                                onTap: _isDelegated
+                                    ? null
+                                    : _showPlannedAttendanceDialog,
                                 child: Container(
-                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 12,
+                                  ),
                                   decoration: BoxDecoration(
-                                    color: _isDelegated ? Colors.white.withValues(alpha: 0.05) : Colors.white.withValues(alpha: 0.2),
+                                    color: _isDelegated
+                                        ? Colors.white.withValues(alpha: 0.05)
+                                        : Colors.white.withValues(alpha: 0.2),
                                     borderRadius: BorderRadius.circular(12),
                                     border: Border.all(
-                                      color: _isDelegated ? Colors.white.withValues(alpha: 0.1) : Colors.white.withValues(alpha: 0.3),
+                                      color: _isDelegated
+                                          ? Colors.white.withValues(alpha: 0.1)
+                                          : Colors.white.withValues(alpha: 0.3),
                                       width: 1,
                                     ),
                                   ),
@@ -777,16 +884,21 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                                     children: [
                                       Icon(
                                         Icons.schedule_rounded,
-                                        color: _isDelegated ? Colors.white54 : Colors.white,
+                                        color: _isDelegated
+                                            ? Colors.white54
+                                            : Colors.white,
                                         size: 20,
                                       ),
                                       const SizedBox(width: 8),
                                       Text(
-                                        _isIntervalMode && _countdownText.isNotEmpty
-                                          ? 'Sonraki: $_countdownText'
-                                          : 'Planlı Yoklama Ayarla',
+                                        _isIntervalMode &&
+                                                _countdownText.isNotEmpty
+                                            ? 'Sonraki: $_countdownText'
+                                            : 'Planlı Yoklama Ayarla',
                                         style: TextStyle(
-                                          color: _isDelegated ? Colors.white54 : Colors.white,
+                                          color: _isDelegated
+                                              ? Colors.white54
+                                              : Colors.white,
                                           fontWeight: FontWeight.bold,
                                           fontSize: 14,
                                         ),
@@ -805,12 +917,18 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                               child: InkWell(
                                 onTap: _isDelegated ? null : _showQRCode,
                                 child: Container(
-                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 12,
+                                  ),
                                   decoration: BoxDecoration(
-                                    color: _isDelegated ? Colors.white.withValues(alpha: 0.05) : Colors.white.withValues(alpha: 0.2),
+                                    color: _isDelegated
+                                        ? Colors.white.withValues(alpha: 0.05)
+                                        : Colors.white.withValues(alpha: 0.2),
                                     borderRadius: BorderRadius.circular(12),
                                     border: Border.all(
-                                      color: _isDelegated ? Colors.white.withValues(alpha: 0.1) : Colors.white.withValues(alpha: 0.3),
+                                      color: _isDelegated
+                                          ? Colors.white.withValues(alpha: 0.1)
+                                          : Colors.white.withValues(alpha: 0.3),
                                       width: 1,
                                     ),
                                   ),
@@ -819,14 +937,18 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                                     children: [
                                       Icon(
                                         Icons.qr_code_2_rounded,
-                                        color: _isDelegated ? Colors.white54 : Colors.white,
+                                        color: _isDelegated
+                                            ? Colors.white54
+                                            : Colors.white,
                                         size: 20,
                                       ),
                                       const SizedBox(width: 8),
                                       Text(
                                         'QR Oluştur',
                                         style: TextStyle(
-                                          color: _isDelegated ? Colors.white54 : Colors.white,
+                                          color: _isDelegated
+                                              ? Colors.white54
+                                              : Colors.white,
                                           fontWeight: FontWeight.bold,
                                           fontSize: 14,
                                         ),
@@ -914,7 +1036,8 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                             return _StudentItem(
                               student: student,
                               isPresent: isPresent,
-                              onTap: () => _toggleAttendance(sid, isPresent),
+                              onTap: () =>
+                                  _setManualAttendance(sid, !isPresent),
                             );
                           },
                         ),
@@ -983,37 +1106,49 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
             ),
             color: Colors.white,
             elevation: 10,
-            itemBuilder: (context) => [
-              'Okul No',
-              'İsim Soyisim',
-              'Durum',
-            ].map((s) => PopupMenuItem(
-              value: s,
-              height: 40,
-              child: Row(
-                children: [
-                  Icon(
-                    s == 'Okul No' ? Icons.numbers_rounded :
-                    s == 'İsim Soyisim' ? Icons.person_rounded :
-                    Icons.check_circle_rounded,
-                    size: 18,
-                    color: _sortBy == s ? AppColors.primary : AppColors.textSecondary,
-                  ),
-                  const SizedBox(width: 10),
-                  Text(
-                    s,
-                    style: TextStyle(
-                      color: _sortBy == s ? AppColors.primary : AppColors.textPrimary,
-                      fontWeight: _sortBy == s ? FontWeight.bold : FontWeight.normal,
-                      fontSize: 13,
+            itemBuilder: (context) => ['Okul No', 'İsim Soyisim', 'Durum']
+                .map(
+                  (s) => PopupMenuItem(
+                    value: s,
+                    height: 40,
+                    child: Row(
+                      children: [
+                        Icon(
+                          s == 'Okul No'
+                              ? Icons.numbers_rounded
+                              : s == 'İsim Soyisim'
+                              ? Icons.person_rounded
+                              : Icons.check_circle_rounded,
+                          size: 18,
+                          color: _sortBy == s
+                              ? AppColors.primary
+                              : AppColors.textSecondary,
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          s,
+                          style: TextStyle(
+                            color: _sortBy == s
+                                ? AppColors.primary
+                                : AppColors.textPrimary,
+                            fontWeight: _sortBy == s
+                                ? FontWeight.bold
+                                : FontWeight.normal,
+                            fontSize: 13,
+                          ),
+                        ),
+                        const Spacer(),
+                        if (_sortBy == s)
+                          const Icon(
+                            Icons.check_circle_rounded,
+                            color: AppColors.primary,
+                            size: 16,
+                          ),
+                      ],
                     ),
                   ),
-                  const Spacer(),
-                  if (_sortBy == s)
-                    const Icon(Icons.check_circle_rounded, color: AppColors.primary, size: 16),
-                ],
-              ),
-            )).toList(),
+                )
+                .toList(),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               child: Row(
@@ -1139,25 +1274,35 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width: 64, height: 64,
+                width: 64,
+                height: 64,
                 decoration: BoxDecoration(
                   color: AppColors.error.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.warning_amber_rounded,
-                    color: AppColors.error, size: 32),
+                child: const Icon(
+                  Icons.warning_amber_rounded,
+                  color: AppColors.error,
+                  size: 32,
+                ),
               ),
               const SizedBox(height: 16),
-              const Text('Uyumsuzluk Tespit Edildi!',
-                  style: TextStyle(
-                    fontSize: 18, fontWeight: FontWeight.bold,
-                    color: AppColors.textPrimary)),
+              const Text(
+                'Uyumsuzluk Tespit Edildi!',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textPrimary,
+                ),
+              ),
               const SizedBox(height: 8),
               Text(
                 'Kişi sayısı eksik, cihaz sayısı fazla!',
                 style: TextStyle(
-                  color: AppColors.error, fontWeight: FontWeight.w600,
-                  fontSize: 14),
+                  color: AppColors.error,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                ),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 16),
@@ -1173,10 +1318,15 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                   children: [
                     Icon(Icons.info_outline, color: AppColors.error, size: 18),
                     SizedBox(width: 8),
-                    Expanded(child: Text(
-                      'Sınıfta olmayan öğrenciler BLE ile yoklamaya giriş yapmış olabilir.',
-                      style: TextStyle(color: AppColors.errorText, fontSize: 12),
-                    )),
+                    Expanded(
+                      child: Text(
+                        'Sınıfta olmayan öğrenciler BLE ile yoklamaya giriş yapmış olabilir.',
+                        style: TextStyle(
+                          color: AppColors.errorText,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -1188,12 +1338,17 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
-                  child: const Text('Tamam',
-                      style: TextStyle(color: Colors.white,
-                          fontWeight: FontWeight.bold)),
+                  child: const Text(
+                    'Tamam',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -1215,25 +1370,35 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width: 64, height: 64,
+                width: 64,
+                height: 64,
                 decoration: BoxDecoration(
                   color: AppColors.warning.withValues(alpha: 0.15),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.phone_disabled_rounded,
-                    color: Color(0xFFE67E22), size: 32),
+                child: const Icon(
+                  Icons.phone_disabled_rounded,
+                  color: Color(0xFFE67E22),
+                  size: 32,
+                ),
               ),
               const SizedBox(height: 16),
-              const Text('Eksik Cihaz Tespit Edildi',
-                  style: TextStyle(
-                    fontSize: 18, fontWeight: FontWeight.bold,
-                    color: AppColors.textPrimary)),
+              const Text(
+                'Eksik Cihaz Tespit Edildi',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textPrimary,
+                ),
+              ),
               const SizedBox(height: 8),
               const Text(
                 'Telefonunda sorun olan öğrenci var mı?',
                 style: TextStyle(
-                  color: Color(0xFFE67E22), fontWeight: FontWeight.w600,
-                  fontSize: 14),
+                  color: Color(0xFFE67E22),
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                ),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 16),
@@ -1247,12 +1412,21 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                 ),
                 child: const Row(
                   children: [
-                    Icon(Icons.lightbulb_outline, color: Color(0xFFE67E22), size: 18),
+                    Icon(
+                      Icons.lightbulb_outline,
+                      color: Color(0xFFE67E22),
+                      size: 18,
+                    ),
                     SizedBox(width: 8),
-                    Expanded(child: Text(
-                      'Telefonunda sorun olan öğrenciler QR kod ile giriş yapabilir.',
-                      style: TextStyle(color: Color(0xFFE67E22), fontSize: 12),
-                    )),
+                    Expanded(
+                      child: Text(
+                        'Telefonunda sorun olan öğrenciler QR kod ile giriş yapabilir.',
+                        style: TextStyle(
+                          color: Color(0xFFE67E22),
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -1264,7 +1438,8 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                       onPressed: () => Navigator.pop(ctx),
                       style: OutlinedButton.styleFrom(
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                         padding: const EdgeInsets.symmetric(vertical: 12),
                       ),
                       child: const Text('Kapat'),
@@ -1283,7 +1458,8 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                         backgroundColor: AppColors.primary,
                         foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                         padding: const EdgeInsets.symmetric(vertical: 12),
                       ),
                     ),
@@ -1309,25 +1485,35 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width: 64, height: 64,
+                width: 64,
+                height: 64,
                 decoration: BoxDecoration(
                   color: AppColors.success.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.check_circle_rounded,
-                    color: AppColors.success, size: 36),
+                child: const Icon(
+                  Icons.check_circle_rounded,
+                  color: AppColors.success,
+                  size: 36,
+                ),
               ),
               const SizedBox(height: 16),
-              const Text('Yoklama Doğrulandı!',
-                  style: TextStyle(
-                    fontSize: 18, fontWeight: FontWeight.bold,
-                    color: AppColors.textPrimary)),
+              const Text(
+                'Yoklama Doğrulandı!',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textPrimary,
+                ),
+              ),
               const SizedBox(height: 8),
               Text(
                 'Kamera ve BLE sonuçları eşleşiyor',
                 style: TextStyle(
-                  color: AppColors.success, fontWeight: FontWeight.w600,
-                  fontSize: 14),
+                  color: AppColors.success,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                ),
               ),
               const SizedBox(height: 16),
               _buildCountComparison(bleCount, cameraCount),
@@ -1339,12 +1525,17 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.success,
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
-                  child: const Text('Harika!',
-                      style: TextStyle(color: Colors.white,
-                          fontWeight: FontWeight.bold)),
+                  child: const Text(
+                    'Harika!',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -1366,21 +1557,38 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
             ),
             child: Column(
               children: [
-                const Icon(Icons.bluetooth_rounded, color: AppColors.primary, size: 24),
+                const Icon(
+                  Icons.bluetooth_rounded,
+                  color: AppColors.primary,
+                  size: 24,
+                ),
                 const SizedBox(height: 6),
-                Text('$bleCount', style: const TextStyle(
-                  fontSize: 24, fontWeight: FontWeight.bold,
-                  color: AppColors.primary)),
-                const Text('BLE Cihaz', style: TextStyle(
-                  color: AppColors.textSecondary, fontSize: 11)),
+                Text(
+                  '$bleCount',
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.primary,
+                  ),
+                ),
+                const Text(
+                  'BLE Cihaz',
+                  style: TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 11,
+                  ),
+                ),
               ],
             ),
           ),
         ),
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: 8),
-          child: Icon(Icons.compare_arrows_rounded,
-              color: AppColors.textSecondary, size: 24),
+          child: Icon(
+            Icons.compare_arrows_rounded,
+            color: AppColors.textSecondary,
+            size: 24,
+          ),
         ),
         Expanded(
           child: Container(
@@ -1391,13 +1599,27 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
             ),
             child: Column(
               children: [
-                const Icon(Icons.camera_alt_rounded, color: Color(0xFF6C63FF), size: 24),
+                const Icon(
+                  Icons.camera_alt_rounded,
+                  color: Color(0xFF6C63FF),
+                  size: 24,
+                ),
                 const SizedBox(height: 6),
-                Text('$cameraCount', style: const TextStyle(
-                  fontSize: 24, fontWeight: FontWeight.bold,
-                  color: Color(0xFF6C63FF))),
-                const Text('Kamera Kişi', style: TextStyle(
-                  color: AppColors.textSecondary, fontSize: 11)),
+                Text(
+                  '$cameraCount',
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF6C63FF),
+                  ),
+                ),
+                const Text(
+                  'Kamera Kişi',
+                  style: TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 11,
+                  ),
+                ),
               ],
             ),
           ),
@@ -1405,7 +1627,6 @@ class _CourseStudentsPageState extends State<CourseStudentsPage> {
       ],
     );
   }
-
 
   @override
   void dispose() {
@@ -1525,12 +1746,16 @@ class _AutomationButton extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: BoxDecoration(
-          color: isActive 
-              ? Colors.white 
-              : (isEnabled ? Colors.white.withValues(alpha: 0.2) : Colors.white.withValues(alpha: 0.05)),
+          color: isActive
+              ? Colors.white
+              : (isEnabled
+                    ? Colors.white.withValues(alpha: 0.2)
+                    : Colors.white.withValues(alpha: 0.05)),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: isEnabled ? Colors.white.withValues(alpha: 0.3) : Colors.white.withValues(alpha: 0.1),
+            color: isEnabled
+                ? Colors.white.withValues(alpha: 0.3)
+                : Colors.white.withValues(alpha: 0.1),
             width: 1,
           ),
         ),
@@ -1550,8 +1775,8 @@ class _AutomationButton extends StatelessWidget {
                   ? 'Taranıyor... ($timer s)'
                   : 'Otomatik Yoklamayı Başlat',
               style: TextStyle(
-                color: isActive 
-                    ? AppColors.primary 
+                color: isActive
+                    ? AppColors.primary
                     : (isEnabled ? Colors.white : Colors.white54),
                 fontWeight: FontWeight.bold,
                 fontSize: 14,
@@ -1893,7 +2118,10 @@ class _CustomCalendarDialogState extends State<_CustomCalendarDialog> {
                   _selectedDate,
                 );
                 return InkWell(
-                  onTap: isSched && (date.isBefore(DateTime.now()) || DateUtils.isSameDay(date, DateTime.now()))
+                  onTap:
+                      isSched &&
+                          (date.isBefore(DateTime.now()) ||
+                              DateUtils.isSameDay(date, DateTime.now()))
                       ? () => setState(() => _selectedDate = date)
                       : null,
                   child: Column(
@@ -1970,5 +2198,3 @@ class _CustomCalendarDialogState extends State<_CustomCalendarDialog> {
     );
   }
 }
-
-

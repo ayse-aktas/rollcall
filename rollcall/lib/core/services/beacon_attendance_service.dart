@@ -8,8 +8,6 @@ import 'package:beacon_broadcast/beacon_broadcast.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../utils/logger.dart';
 
-
-
 class BeaconAttendanceService {
   static final BeaconAttendanceService _instance =
       BeaconAttendanceService._internal();
@@ -60,11 +58,10 @@ class BeaconAttendanceService {
     try {
       AppLogger.i('📱 Bluetooth izinleri isteniyor...');
 
-
       final advertiseStatus = await Permission.bluetoothAdvertise.request();
       final scanStatus = await Permission.bluetoothScan.request();
       final connectStatus = await Permission.bluetoothConnect.request();
-      
+
       // Location permission commented out for pure beacon broadcast if needed,
       // but note that scanning still requires location on most Android versions.
       // final locationStatus = await Permission.locationWhenInUse.request();
@@ -74,7 +71,6 @@ class BeaconAttendanceService {
       AppLogger.d('📱 Connect izni: $connectStatus');
       // AppLogger.d('📱 Location izni: $locationStatus');
 
-
       if (!advertiseStatus.isGranted) {
         AppLogger.w('⚠️ BLUETOOTH_ADVERTISE izni verilmedi! Yayın yapılamaz.');
 
@@ -83,7 +79,6 @@ class BeaconAttendanceService {
 
       final isSupported = await _beaconBroadcast.checkTransmissionSupported();
       AppLogger.i('📡 Beacon Transmit Desteği: $isSupported');
-
 
       if (isSupported != BeaconStatus.supported) {
         AppLogger.w('⚠️ Bu cihaz beacon yayını desteklemiyor: $isSupported');
@@ -99,7 +94,6 @@ class BeaconAttendanceService {
       AppLogger.d('   Okul No: $schoolNo');
       AppLogger.d('   Hash Major: $hashMajor, Hash Minor: $hashMinor');
 
-
       _beaconBroadcast
           .setUUID('E2C56DB5-DFFB-48D2-B060-D0F5A71096B1')
           .setMajorId(hashMajor)
@@ -109,10 +103,8 @@ class BeaconAttendanceService {
 
       _isContinuousBroadcasting = true;
       AppLogger.i('🟢 BLE Yayını Aktif!');
-
     } catch (e) {
       AppLogger.e('❌ BLE Yayın Hatası: $e');
-
     }
   }
 
@@ -122,10 +114,8 @@ class BeaconAttendanceService {
       _beaconBroadcast.stop();
       _isContinuousBroadcasting = false;
       AppLogger.i('🔴 Sürekli BLE Yayını Durduruldu');
-
     } catch (e) {
       AppLogger.e('❌ BLE Durdurma Hatası: $e');
-
     }
   }
 
@@ -161,7 +151,6 @@ class BeaconAttendanceService {
       });
     } catch (e) {
       AppLogger.e('Automation Error: $e');
-
     } finally {
       Future.delayed(const Duration(seconds: 45), () {
         _stopScanning();
@@ -212,6 +201,20 @@ class BeaconAttendanceService {
           .eq('id', courseId)
           .single();
 
+      final enrollment = await _supabase
+          .from('student_courses')
+          .select('course_id')
+          .eq('student_id', studentId)
+          .eq('course_id', courseId)
+          .maybeSingle();
+
+      if (enrollment == null) {
+        AppLogger.w(
+          'Skipping BLE attendance because $studentId is not enrolled in $courseId',
+        );
+        return;
+      }
+
       final secret =
           courseData['classrooms']['beacon_secret'] ?? 'secret_yaz_lab_1';
       final courseName = courseData['course_name'];
@@ -236,19 +239,40 @@ class BeaconAttendanceService {
 
       final dateStr = DateTime.now().toIso8601String().split('T')[0];
 
-      await _supabase.from('attendance').upsert({
-        'student_id': studentId,
-        'course_id': courseId,
-        'date': dateStr,
-        'is_present': true,
-        'verify_method': 'ble',
-      }, onConflict: 'student_id, course_id, date');
+      // Prevent automatic BLE updates from overwriting a teacher's manual mark.
+      final existingRows = await _supabase
+          .from('attendance')
+          .select('id, verify_method, created_at')
+          .eq('student_id', studentId)
+          .eq('course_id', courseId)
+          .eq('date', dateStr)
+          .order('created_at', ascending: false)
+          .limit(1);
+      final existing = existingRows.isNotEmpty ? existingRows.first : null;
+
+      if (existing != null &&
+          (existing['verify_method'] ?? '').toString().toLowerCase() ==
+              'manual') {
+        // Respect manual override — do not overwrite.
+        AppLogger.i(
+          'Skipping BLE upsert because manual attendance exists for $studentId',
+        );
+        return;
+      } else {
+        await _supabase.from('attendance').upsert({
+          'student_id': studentId,
+          'course_id': courseId,
+          'date': dateStr,
+          'is_present': true,
+          'verify_method': 'ble',
+          'created_at': DateTime.now().toIso8601String(),
+        }, onConflict: 'student_id, course_id, date');
+      }
 
       _startSelfIdentification(schoolNo);
       _showSuccessNotification(courseName);
     } catch (e) {
       AppLogger.e('Verification Error: $e');
-
     }
   }
 
@@ -260,7 +284,6 @@ class BeaconAttendanceService {
 
     AppLogger.i('Starting Self-Identification Beacon: Minor $studentMinor');
 
-
     _beaconBroadcast
         .setUUID('E2C56DB5-DFFB-48D2-B060-D0F5A71096B1')
         .setMajorId(999)
@@ -271,7 +294,6 @@ class BeaconAttendanceService {
     Future.delayed(const Duration(seconds: 30), () {
       _beaconBroadcast.stop();
       AppLogger.i('Self-Identification Beacon Stopped');
-
     });
   }
 

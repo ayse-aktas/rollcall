@@ -54,18 +54,20 @@ class _QRScannerPageState extends State<QRScannerPage> {
             throw 'Konum izni reddedildi.';
           }
         }
-        
+
         final studentPosition = await Geolocator.getCurrentPosition(
-          locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+          ),
         );
-        
+
         final distance = Geolocator.distanceBetween(
           teacherLat,
           teacherLng,
           studentPosition.latitude,
           studentPosition.longitude,
         );
-        
+
         if (distance > 15) {
           throw 'Hocaya çok uzaksınız. QR kodu okutabilmek için hocaya 15 metreden daha yakın olmalısınız. (Uzaklık: ${distance.toStringAsFixed(1)} m)';
         }
@@ -103,14 +105,18 @@ class _QRScannerPageState extends State<QRScannerPage> {
 
       // 3. Record attendance
       try {
-        await _upsertAttendanceWithOptionalMethod({
+        final didSaveAttendance = await _upsertAttendanceWithOptionalMethod({
           'student_id': studentId,
           'course_id': courseId,
           'date': date,
           'slot': slot,
           'is_present': true,
           'verify_method': 'qr',
+          'created_at': DateTime.now().toIso8601String(),
         });
+        if (!didSaveAttendance) {
+          throw 'Bu yoklama öğretmen tarafından manuel düzenlenmiş. QR ile değiştirilemez.';
+        }
       } on PostgrestException catch (e) {
         if (e.code == '42501') {
           throw 'Yoklama kaydedilemedi. Veritabanı yetki hatası (RLS). Lütfen yöneticinizle iletişime geçin.';
@@ -140,14 +146,14 @@ class _QRScannerPageState extends State<QRScannerPage> {
     }
   }
 
-  Future<void> _upsertAttendanceWithOptionalMethod(
+  Future<bool> _upsertAttendanceWithOptionalMethod(
     Map<String, dynamic> values,
   ) async {
     final supabaseClient = Supabase.instance.client;
     try {
       final existing = await supabaseClient
           .from('attendance')
-          .select('id')
+          .select('id, verify_method')
           .eq('student_id', values['student_id'])
           .eq('course_id', values['course_id'])
           .eq('date', values['date'])
@@ -155,15 +161,18 @@ class _QRScannerPageState extends State<QRScannerPage> {
           .maybeSingle();
 
       if (existing != null) {
+        if ((existing['verify_method'] ?? '').toString().toLowerCase() ==
+            'manual') {
+          return false;
+        }
         await supabaseClient
             .from('attendance')
             .update(values)
             .eq('id', existing['id']);
       } else {
-        await supabaseClient
-            .from('attendance')
-            .insert(values);
+        await supabaseClient.from('attendance').insert(values);
       }
+      return true;
     } on PostgrestException catch (e) {
       final message = e.message.toLowerCase();
       final isMissingMethodColumn =
@@ -175,10 +184,10 @@ class _QRScannerPageState extends State<QRScannerPage> {
 
       final fallbackValues = Map<String, dynamic>.from(values)
         ..remove('verify_method');
-        
+
       final existing = await supabaseClient
           .from('attendance')
-          .select('id')
+          .select('id, verify_method')
           .eq('student_id', fallbackValues['student_id'])
           .eq('course_id', fallbackValues['course_id'])
           .eq('date', fallbackValues['date'])
@@ -186,15 +195,18 @@ class _QRScannerPageState extends State<QRScannerPage> {
           .maybeSingle();
 
       if (existing != null) {
+        if ((existing['verify_method'] ?? '').toString().toLowerCase() ==
+            'manual') {
+          return false;
+        }
         await supabaseClient
             .from('attendance')
             .update(fallbackValues)
             .eq('id', existing['id']);
       } else {
-        await supabaseClient
-            .from('attendance')
-            .insert(fallbackValues);
+        await supabaseClient.from('attendance').insert(fallbackValues);
       }
+      return true;
     }
   }
 
