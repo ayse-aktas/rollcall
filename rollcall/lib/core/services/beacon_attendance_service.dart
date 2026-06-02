@@ -239,38 +239,25 @@ class BeaconAttendanceService {
 
       final dateStr = DateTime.now().toIso8601String().split('T')[0];
 
-      // Prevent automatic BLE updates from overwriting a teacher's manual mark.
-      final existingRows = await _supabase
-          .from('attendance')
-          .select('id, verify_method, created_at')
-          .eq('student_id', studentId)
-          .eq('course_id', courseId)
-          .eq('date', dateStr)
-          .order('created_at', ascending: false)
-          .limit(1);
-      final existing = existingRows.isNotEmpty ? existingRows.first : null;
-
-      if (existing != null &&
-          (existing['verify_method'] ?? '').toString().toLowerCase() ==
-              'manual') {
-        // Respect manual override — do not overwrite.
-        AppLogger.i(
-          'Skipping BLE upsert because manual attendance exists for $studentId',
-        );
-        return;
-      } else {
-        await _supabase.from('attendance').upsert({
-          'student_id': studentId,
-          'course_id': courseId,
-          'date': dateStr,
-          'is_present': true,
-          'verify_method': 'ble',
-          'created_at': DateTime.now().toIso8601String(),
-        }, onConflict: 'student_id, course_id, date');
-      }
+      await _supabase.from('attendance').upsert({
+        'student_id': studentId,
+        'course_id': courseId,
+        'date': dateStr,
+        'is_present': true,
+        'verify_method': 'ble',
+        'created_at': DateTime.now().toIso8601String(),
+      }, onConflict: 'student_id, course_id, date');
 
       _startSelfIdentification(schoolNo);
       _showSuccessNotification(courseName);
+    } on PostgrestException catch (e) {
+      if (e.code == '23514') {
+        AppLogger.w(
+          'Skipping BLE attendance because the database rejected an unenrolled student: $studentId / $courseId',
+        );
+        return;
+      }
+      AppLogger.e('Verification Error: $e');
     } catch (e) {
       AppLogger.e('Verification Error: $e');
     }

@@ -114,12 +114,13 @@ class _QRScannerPageState extends State<QRScannerPage> {
           'verify_method': 'qr',
           'created_at': DateTime.now().toIso8601String(),
         });
-        if (!didSaveAttendance) {
-          throw 'Bu yoklama öğretmen tarafından manuel düzenlenmiş. QR ile değiştirilemez.';
-        }
+        if (!didSaveAttendance) throw 'QR yoklama kaydedilemedi.';
       } on PostgrestException catch (e) {
         if (e.code == '42501') {
           throw 'Yoklama kaydedilemedi. Veritabanı yetki hatası (RLS). Lütfen yöneticinizle iletişime geçin.';
+        }
+        if (e.code == '23514') {
+          throw 'Bu derse kayıtlı değilsiniz. Yoklama kaydı oluşturulmadı.';
         }
         rethrow;
       }
@@ -161,10 +162,6 @@ class _QRScannerPageState extends State<QRScannerPage> {
           .maybeSingle();
 
       if (existing != null) {
-        if ((existing['verify_method'] ?? '').toString().toLowerCase() ==
-            'manual') {
-          return false;
-        }
         await supabaseClient
             .from('attendance')
             .update(values)
@@ -195,10 +192,6 @@ class _QRScannerPageState extends State<QRScannerPage> {
           .maybeSingle();
 
       if (existing != null) {
-        if ((existing['verify_method'] ?? '').toString().toLowerCase() ==
-            'manual') {
-          return false;
-        }
         await supabaseClient
             .from('attendance')
             .update(fallbackValues)
