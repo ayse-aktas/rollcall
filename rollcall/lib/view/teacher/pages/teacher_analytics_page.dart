@@ -750,7 +750,7 @@ class _TeacherAnalyticsPageState extends State<TeacherAnalyticsPage> {
                       children: [
                         _buildSummaryCards(),
                         const SizedBox(height: 28),
-                        _buildSectionHeader('Ders Yoğunluğu (Isı Haritası)', Icons.grid_view_rounded),
+                        _buildSectionHeader('Ders Yoğunluğu', Icons.grid_view_rounded),
                         const SizedBox(height: 12),
                         _buildHeatmap(),
                         const SizedBox(height: 32),
