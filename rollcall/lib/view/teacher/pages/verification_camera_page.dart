@@ -75,14 +75,21 @@ class _VerificationCameraPageState extends State<VerificationCameraPage>
       _isProcessing = true;
     });
 
+    File? fileToDelete;
     try {
       final XFile imageFile = await _cameraController!.takePicture();
+      fileToDelete = File(imageFile.path);
       
-      final file = File(imageFile.path);
-      if (!await file.exists()) throw Exception('Fotoğraf dosyası oluşturulamadı');
+      if (!await fileToDelete.exists()) throw Exception('Fotoğraf dosyası oluşturulamadı');
 
       final inputImage = InputImage.fromFilePath(imageFile.path);
       final result = await PersonDetectorService.instance.detectPersons(inputImage);
+
+      // Algılama bittikten sonra geçici dosyayı siliyoruz
+      if (await fileToDelete.exists()) {
+        await fileToDelete.delete();
+        debugPrint('🗑️ Geçici fotoğraf dosyası başarıyla silindi.');
+      }
 
       if (!mounted) return;
 
@@ -97,6 +104,16 @@ class _VerificationCameraPageState extends State<VerificationCameraPage>
 
       Navigator.pop(context, result);
     } catch (e) {
+      // Hata oluşsa bile geçici dosyayı temizlemeye çalışıyoruz
+      if (fileToDelete != null && await fileToDelete.exists()) {
+        try {
+          await fileToDelete.delete();
+          debugPrint('🗑️ Hata sonrası geçici fotoğraf dosyası silindi.');
+        } catch (deleteError) {
+          debugPrint('⚠️ Hata sonrası dosya silinirken hata oluştu: $deleteError');
+        }
+      }
+
       if (mounted) {
         _showErrorSnackBar('Hata: $e');
         setState(() {
