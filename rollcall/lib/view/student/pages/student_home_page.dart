@@ -283,49 +283,7 @@ class _StudentHomePageState extends State<StudentHomePage> {
     );
   }
 
-  void _showProfile() {
-    final email = _supabase.auth.currentUser?.email ?? '';
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (context) => _ProfileSheet(
-        profile: _profile,
-        email: email,
-        onSave: (updatedData, newPassword) async {
-          try {
-            if (newPassword != null && newPassword.isNotEmpty) {
-              await _supabase.auth.updateUser(UserAttributes(password: newPassword));
-            }
-            try {
-              await _supabase.from('users').update({
-                'first_name': updatedData['first_name'],
-                'bio': updatedData['bio'],
-                'phone': updatedData['phone'],
-                'website': updatedData['website'],
-              }).eq('id', _supabase.auth.currentUser!.id);
-            } catch (e) {
-              debugPrint('Error updating extended profile fields (columns might not exist): $e');
-              try {
-                await _supabase.from('users').update({
-                  'first_name': updatedData['first_name'],
-                }).eq('id', _supabase.auth.currentUser!.id);
-              } catch (_) {}
-            }
-            await _loadData();
-            if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profil güncellendi!')));
-            }
-          } catch (e) {
-            debugPrint('Error updating profile: $e');
-            if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profil güncellenirken hata oluştu.')));
-            }
-          }
-        },
-      ),
-    );
-  }
+
 
   Future<void> _signOut() async {
     await _supabase.auth.signOut();
@@ -382,7 +340,6 @@ class _StudentHomePageState extends State<StudentHomePage> {
                           profile: _profile, 
                           onSignOut: _signOut,
                           onNotify: _showNotifications,
-                          onProfileTap: _showProfile,
                           hasUnread: hasUnread,
                           unreadCount: unreadCount,
                         ),
@@ -431,7 +388,6 @@ class _Header extends StatelessWidget {
   final Map<String, dynamic>? profile;
   final VoidCallback onSignOut;
   final VoidCallback onNotify;
-  final VoidCallback onProfileTap;
   final bool hasUnread;
   final int unreadCount;
   
@@ -439,7 +395,6 @@ class _Header extends StatelessWidget {
     required this.profile, 
     required this.onSignOut,
     required this.onNotify,
-    required this.onProfileTap,
     required this.hasUnread,
     required this.unreadCount,
   });
@@ -450,44 +405,38 @@ class _Header extends StatelessWidget {
     final schoolNo = profile?['school_no'] ?? '';
     return Row(
       children: [
-        GestureDetector(
-          onTap: onProfileTap,
-          child: Container(
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white.withValues(alpha: 0.5), width: 2),
-              boxShadow: [
-                BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 10),
-              ],
-            ),
-            child: CircleAvatar(
-              radius: 26,
-              backgroundColor: Colors.white.withValues(alpha: 0.2),
-              child: Text(
-                (profile?['first_name'] ?? 'U')[0].toUpperCase(),
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20),
-              ),
+        Container(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white.withValues(alpha: 0.5), width: 2),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 10),
+            ],
+          ),
+          child: CircleAvatar(
+            radius: 26,
+            backgroundColor: Colors.white.withValues(alpha: 0.2),
+            child: Text(
+              (profile?['first_name'] ?? 'U')[0].toUpperCase(),
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20),
             ),
           ),
         ),
         const SizedBox(width: 16),
         Expanded(
-          child: GestureDetector(
-            onTap: onProfileTap,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  name,
-                  style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'Numara: $schoolNo',
-                  style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 13, fontWeight: FontWeight.w500),
-                ),
-              ],
-            ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                name,
+                style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                'Numara: $schoolNo',
+                style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 13, fontWeight: FontWeight.w500),
+              ),
+            ],
           ),
         ),
         _HeaderIcon(
@@ -1156,287 +1105,4 @@ class _StatItem extends StatelessWidget {
   }
 }
 
-// ── CUSTOM PROFILE SHEET ────────────────────────────────
-class _ProfileSheet extends StatefulWidget {
-  final Map<String, dynamic>? profile;
-  final String email;
-  final Function(Map<String, dynamic> updatedData, String? newPassword) onSave;
 
-  const _ProfileSheet({
-    required this.profile,
-    required this.email,
-    required this.onSave,
-  });
-
-  @override
-  State<_ProfileSheet> createState() => _ProfileSheetState();
-}
-
-class _ProfileSheetState extends State<_ProfileSheet> {
-  bool _isEditing = false;
-  
-  late TextEditingController _nameController;
-  late TextEditingController _bioController;
-  late TextEditingController _emailController;
-  late TextEditingController _phoneController;
-  late TextEditingController _webController;
-  late TextEditingController _passwordController;
-  late TextEditingController _confirmPasswordController;
-
-  @override
-  void initState() {
-    super.initState();
-    final firstName = widget.profile?['first_name'] ?? '';
-    _nameController = TextEditingController(text: firstName);
-    _bioController = TextEditingController(text: widget.profile?['bio'] ?? 'Bilgisayar Mühendisliği Öğrencisi. Yazılım geliştirmeyi ve yeni teknolojileri öğrenmeyi seviyorum.');
-    _emailController = TextEditingController(text: widget.email);
-    _phoneController = TextEditingController(text: widget.profile?['phone'] ?? '');
-    _webController = TextEditingController(text: widget.profile?['website'] ?? '');
-    _passwordController = TextEditingController();
-    _confirmPasswordController = TextEditingController();
-  }
-
-  @override
-  void dispose() {
-    _nameController.dispose();
-    _bioController.dispose();
-    _emailController.dispose();
-    _phoneController.dispose();
-    _webController.dispose();
-    _passwordController.dispose();
-    _confirmPasswordController.dispose();
-    super.dispose();
-  }
-
-  void _toggleEdit() {
-    setState(() {
-      _isEditing = !_isEditing;
-    });
-  }
-
-  Future<void> _handleSave() async {
-    if (_passwordController.text.isNotEmpty && _passwordController.text != _confirmPasswordController.text) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Şifreler eşleşmiyor!')));
-      return;
-    }
-
-    final updatedData = {
-      'first_name': _nameController.text.trim(),
-      'bio': _bioController.text.trim(),
-      'phone': _phoneController.text.trim(),
-      'website': _webController.text.trim(),
-    };
-    
-    await widget.onSave(updatedData, _passwordController.text.isNotEmpty ? _passwordController.text : null);
-    
-    if (mounted) {
-      setState(() {
-        _isEditing = false;
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.85,
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
-      ),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const SizedBox(width: 32),
-              Expanded(
-                child: Text(
-                  _isEditing ? 'Profili Düzenle' : 'Profil Sayfası',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600, color: Color(0xFF1F2937)),
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.close_rounded, color: Colors.black, size: 28),
-                onPressed: () => Navigator.pop(context),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          Expanded(
-            child: SingleChildScrollView(
-              physics: const BouncingScrollPhysics(),
-              child: _isEditing ? _buildEditMode() : _buildViewMode(),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildViewMode() {
-    final name = '${widget.profile?['first_name'] ?? ''} ${widget.profile?['last_name'] ?? ''}';
-    return Column(
-      children: [
-        Container(
-          width: 100,
-          height: 100,
-          decoration: const BoxDecoration(
-            color: Color(0xFFD1D5DB),
-            shape: BoxShape.circle,
-          ),
-          child: const Icon(Icons.person, size: 60, color: Colors.white),
-        ),
-        const SizedBox(height: 12),
-        GestureDetector(
-          onTap: _toggleEdit,
-          child: const Text(
-            'Düzenle',
-            style: TextStyle(color: Color(0xFF0090FF), fontSize: 16, fontWeight: FontWeight.w700),
-          ),
-        ),
-        const SizedBox(height: 16),
-        Text(
-          name.isNotEmpty ? name.trim() : 'Öğrenci',
-          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w600, color: Color(0xFF374151)),
-        ),
-        const SizedBox(height: 12),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0),
-          child: Text(
-            _bioController.text,
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 14, color: Color(0xFF6B7280), height: 1.5),
-          ),
-        ),
-        const SizedBox(height: 32),
-        _buildViewField('E-Mail', _emailController.text),
-        const SizedBox(height: 16),
-        _buildViewField('İletişim', _phoneController.text.isNotEmpty ? _phoneController.text : 'Girilmemiş'),
-        const SizedBox(height: 16),
-        _buildViewField('Web', _webController.text.isNotEmpty ? _webController.text : 'Girilmemiş'),
-        const SizedBox(height: 40),
-        SizedBox(
-          width: double.infinity,
-          height: 50,
-          child: ElevatedButton(
-            onPressed: _toggleEdit,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF0090FF),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
-              elevation: 0,
-            ),
-            child: const Text(
-              'Profili Düzenle',
-              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-          ),
-        ),
-        const SizedBox(height: 20),
-      ],
-    );
-  }
-
-  Widget _buildEditMode() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildEditField('Kullanıcı adı', _nameController),
-        const SizedBox(height: 16),
-        _buildEditField('Biografi', _bioController, maxLines: 3),
-        const SizedBox(height: 16),
-        _buildEditField('E-Mail', _emailController, readOnly: true),
-        const SizedBox(height: 16),
-        _buildEditField('İletişim', _phoneController),
-        const SizedBox(height: 16),
-        _buildEditField('Web', _webController),
-        const SizedBox(height: 16),
-        _buildEditField('Şifre', _passwordController, isPassword: true, hint: '*************'),
-        const SizedBox(height: 16),
-        _buildEditField('Şifreyi onayla', _confirmPasswordController, isPassword: true),
-        const SizedBox(height: 40),
-        SizedBox(
-          width: double.infinity,
-          height: 50,
-          child: ElevatedButton(
-            onPressed: _handleSave,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF0090FF),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
-              elevation: 0,
-            ),
-            child: const Text(
-              'Güncelle',
-              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-          ),
-        ),
-        const SizedBox(height: 20),
-      ],
-    );
-  }
-
-  Widget _buildViewField(String label, String value) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF4B5563)),
-        ),
-        const SizedBox(height: 6),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFFD1D5DB)),
-          ),
-          child: Text(
-            value,
-            style: const TextStyle(fontSize: 15, color: Color(0xFF6B7280)),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildEditField(String label, TextEditingController controller, {bool isPassword = false, int maxLines = 1, bool readOnly = false, String? hint}) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF4B5563)),
-        ),
-        const SizedBox(height: 6),
-        TextField(
-          controller: controller,
-          obscureText: isPassword,
-          maxLines: isPassword ? 1 : maxLines,
-          readOnly: readOnly,
-          style: const TextStyle(fontSize: 15, color: Color(0xFF374151)),
-          decoration: InputDecoration(
-            hintText: hint,
-            hintStyle: const TextStyle(color: Color(0xFF9CA3AF)),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Color(0xFFD1D5DB)),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Color(0xFF0090FF), width: 1.5),
-            ),
-            suffixIcon: readOnly 
-                ? null 
-                : const Icon(Icons.edit, size: 18, color: Color(0xFF6B7280)),
-          ),
-        ),
-      ],
-    );
-  }
-}
