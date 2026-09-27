@@ -8,29 +8,25 @@ RollCall is a Flutter-based attendance application. It supports student and teac
 
 The following screenshots are exported from the project poster and stored in `assets/images/poster/`:
 
-### Teacher attendance and QR code
+<div align="center">
+<h3>Teacher attendance and QR code</h3>
+<img src="assets/images/poster/14.jpg" alt="Teacher attendance and QR code" width="650">
 
-![Teacher attendance and QR code](assets/images/poster/14.jpg)
+<h3>Scheduled attendance and notifications</h3>
+<img src="assets/images/poster/15.jpg" alt="Scheduled attendance and notifications" width="650">
 
-### Scheduled attendance and notifications
+<h3>Camera and BLE verification</h3>
+<img src="assets/images/poster/16.jpg" alt="Camera and BLE verification" width="650">
 
-![Scheduled attendance and notifications](assets/images/poster/15.jpg)
+<h3>Analytics and attendance report</h3>
+<img src="assets/images/poster/17.jpg" alt="Analytics and attendance report" width="650">
 
-### Camera and BLE verification
+<h3>Administration panel</h3>
+<img src="assets/images/poster/18.jpg" alt="Administration panel" width="650">
 
-![Camera and BLE verification](assets/images/poster/16.jpg)
-
-### Analytics and attendance report
-
-![Analytics and attendance report](assets/images/poster/17.jpg)
-
-### Administration panel
-
-![Administration panel](assets/images/poster/18.jpg)
-
-### Student screens
-
-![Student screens](assets/images/poster/19.jpg)
+<h3>Student screens</h3>
+<img src="assets/images/poster/19.jpg" alt="Student screens" width="650">
+</div>
 
 ## Architecture
 
@@ -175,15 +171,7 @@ flutter test
 cd backend
 go test ./...
 ```
-
-## License
-
-Add the project license and contribution rules here when they are decided.
-
 ---
-
-# Türkçe
-
 RollCall; öğrenci ve öğretmen hesaplarını, QR ile yoklamayı, BLE beacon ile yoklamayı, analiz ekranlarını, bildirimleri ve isteğe bağlı Go doğrulama backend'ini destekleyen Flutter tabanlı bir yoklama uygulamasıdır.
 
 ## Proje Görselleri
@@ -192,29 +180,25 @@ RollCall; öğrenci ve öğretmen hesaplarını, QR ile yoklamayı, BLE beacon i
 
 Poster dosyasından dışa aktarılan ve `assets/images/poster/` klasöründe bulunan gerçek görseller aşağıdadır.
 
-### Öğretmen yoklama ve QR kodu
+<div align="center">
+<h3>Öğretmen yoklama ve QR kodu</h3>
+<img src="assets/images/poster/14.jpg" alt="Öğretmen yoklama ve QR kodu" width="650">
 
-![Öğretmen yoklama ve QR kodu](assets/images/poster/14.jpg)
+<h3>Planlı yoklama ve bildirimler</h3>
+<img src="assets/images/poster/15.jpg" alt="Planlı yoklama ve bildirimler" width="650">
 
-### Planlı yoklama ve bildirimler
+<h3>Kamera ve BLE doğrulaması</h3>
+<img src="assets/images/poster/16.jpg" alt="Kamera ve BLE doğrulaması" width="650">
 
-![Planlı yoklama ve bildirimler](assets/images/poster/15.jpg)
+<h3>Analiz ve yoklama raporu</h3>
+<img src="assets/images/poster/17.jpg" alt="Analiz ve yoklama raporu" width="650">
 
-### Kamera ve BLE doğrulaması
+<h3>Yönetim paneli</h3>
+<img src="assets/images/poster/18.jpg" alt="Yönetim paneli" width="650">
 
-![Kamera ve BLE doğrulaması](assets/images/poster/16.jpg)
-
-### Analiz ve yoklama raporu
-
-![Analiz ve yoklama raporu](assets/images/poster/17.jpg)
-
-### Yönetim paneli
-
-![Yönetim paneli](assets/images/poster/18.jpg)
-
-### Öğrenci ekranları
-
-![Öğrenci ekranları](assets/images/poster/19.jpg)
+<h3>Öğrenci ekranları</h3>
+<img src="assets/images/poster/19.jpg" alt="Öğrenci ekranları" width="650">
+</div>
 
 ## Mimari
 
@@ -361,7 +345,3 @@ flutter test
 cd backend
 go test ./...
 ```
-
-## Lisans
-
-Proje lisansı ve katkı kuralları belirlendiğinde bu bölüme eklenmelidir.
